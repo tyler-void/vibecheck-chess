@@ -142,6 +142,12 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 
 	r.seq++
 
+	// Re-arm the flag timer for the side that's now on the clock. The
+	// previous timer (if any) is stopped inside resetFlagTimerLocked; even
+	// if it fires concurrently, the captured-seq stale guard inside
+	// onFlagTimer will discard the stale fire.
+	r.resetFlagTimerLocked(now)
+
 	snap := r.snapshotLocked(now)
 	bytes := dsenc.PatchSignalsBytes(snap.Seq, snap.toSignalsJSON())
 	r.recent.Append(snap.Seq, SSEEvent{Seq: snap.Seq, Bytes: bytes})

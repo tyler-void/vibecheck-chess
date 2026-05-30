@@ -66,6 +66,8 @@ type GameRoom struct {
 // NewGameRoom constructs a room ready to accept the first move. White is on
 // the clock at t = now (matches the FIDE convention for online play: the
 // clock starts at game-create time, not on a separate "start" signal).
+// The flag timer is armed before return so White's initial time begins
+// counting down immediately.
 func NewGameRoom(id GameID, white, black PlayerID, tc TimeControl, now time.Time) *GameRoom {
 	r := &GameRoom{
 		game:        libchess.NewGame(),
@@ -80,6 +82,15 @@ func NewGameRoom(id GameID, white, black PlayerID, tc TimeControl, now time.Time
 	// Seed repetition with the starting position so the first repeat is
 	// counted from move 0.
 	r.repetition[positionKey(r.game.Position())] = 1
+
+	// Arm the initial flag timer. The room isn't shared with any other
+	// goroutine yet so we don't strictly need the lock, but
+	// resetFlagTimerLocked's contract says "caller holds mu" — take it
+	// for the ~1µs critical section to keep the discipline mechanical.
+	r.mu.Lock()
+	r.resetFlagTimerLocked(now)
+	r.mu.Unlock()
+
 	return r
 }
 
