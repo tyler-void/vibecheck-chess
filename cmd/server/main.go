@@ -59,6 +59,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Background eviction of terminal+idle rooms (FR-031). The goroutine
+	// exits when ctx is cancelled (SIGINT/SIGTERM).
+	manager.StartGC(ctx)
+
 	listenErr := make(chan error, 1)
 	go func() {
 		logger.Info("listening", slog.String("addr", *addr), slog.String("static_root", *staticRoot))
