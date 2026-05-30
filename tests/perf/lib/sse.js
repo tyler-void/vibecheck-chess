@@ -1,21 +1,26 @@
-// Minimal SSE consumer for k6 perf tests.
+// Minimal SSE consumer for k6 perf tests against the kisschess server.
 //
-// Uses k6's experimental SSE module:
-//   https://grafana.com/docs/k6/latest/javascript-api/k6-experimental/sse/
+// The server emits Datastar v1.0+ wire frames (per
+// specs/001-kiss-chess-engine/contracts/sse-events.md):
 //
-// If your k6 build was compiled without the experimental SSE module
-// (rare on recent versions >= v0.47), fall back to the http-stream
-// approach sketched at the bottom of this file. Vanilla JS only.
+//   event: datastar-patch-signals
+//   id: <seq>
+//   data: signals {"seq":42,"server_unix_ms":...,"white_ms":...,...}
 //
-// Each k6 VU calling subscribe() opens one SSE connection. Per the
-// system constraints (1-3 SSE connections per user per game), do NOT
-// multiplex many SSE streams inside a single VU iteration.
+// We parse the `data:` line by stripping the leading "signals " (8 chars)
+// to recover the JSON snapshot projection. `datastar-patch-elements`
+// frames carry HTML rather than JSON and are ignored for metrics —
+// they're used for hydration / move-list rendering, not for per-event
+// state we want to measure.
+//
+// Requires a k6 binary built with the phymbert/xk6-sse extension. The
+// Makefile target `make $(PERF_BIN)` runs `xk6 build --with
+// github.com/phymbert/xk6-sse@latest`.
 
-import sse from 'k6/experimental/sse';
+import sse from 'k6/x/sse';
 import { Trend, Rate, Counter } from 'k6/metrics';
 
-// Custom metrics referenced by scenario thresholds. Keeping names
-// stable here so scenarios can tag and filter consistently.
+// Custom metrics referenced by scenario thresholds.
 export const sseEventLagMs = new Trend('sse_event_lag_ms', true);
 export const sseConnectionDroppedIdle = new Rate('sse_connection_dropped_idle');
 export const sseReconnectSuccessZeroGap = new Rate('sse_reconnect_success_zero_gap');
@@ -23,24 +28,26 @@ export const sseDuplicateEvent = new Rate('sse_duplicate_event');
 export const sseSequenceGap = new Rate('sse_sequence_gap');
 export const sseEventsReceived = new Counter('sse_events_received');
 
-// Goroutine/heap bounded checks are emitted as k6 checks in scenarios
-// (so they show up under `checks{check:goroutines_bounded}` etc.). We
-// expose helpers here for the metric names only.
+// Datastar event names per the v1.0+ wire spec.
+const EVT_SIGNALS = 'datastar-patch-signals';
+const EVT_ELEMENTS = 'datastar-patch-elements';
 
-// subscribe(url, opts) -> opens an SSE stream and invokes opts.onEvent
-// for each parsed board event. Returns when the stream closes.
+// subscribe(url, opts) -> opens one SSE stream and invokes opts.onEvent
+// for each parsed signal frame. Returns when the stream closes.
 //
 // opts:
-//   headers:        extra HTTP headers (e.g. Last-Event-ID, Authorization)
+//   headers:        extra HTTP headers (e.g. Last-Event-ID)
 //   tags:           k6 tag map applied to emitted metrics
-//   onEvent(evt):   called for each parsed JSON SSE data frame
+//   onEvent(evt):   called for each parsed snapshot signal patch
 //   onOpen():       called once when the connection is established
 //   onError(err):   called on transport / parse errors
-//   slowReader:     if true, sleep ~1s between events (for hot-match)
-//   maxEvents:      stop after N events (default: unbounded; rely on test duration)
+//   slowReader:     if true, busy-wait ~1s between events (for hot-match
+//                   fanout scenarios that need slow VUs)
+//   maxEvents:      stop after N signal events
 //
 // The event object passed to onEvent is:
-//   { id: string, lastEventID: string, seq: number, raw: object, recvUnixMs: number }
+//   { id, lastEventID, seq, raw, recvUnixMs }
+// where `raw` is the parsed JSON object from the `data: signals ...` line.
 export function subscribe(url, opts) {
   opts = opts || {};
   const headers = Object.assign(
@@ -60,22 +67,39 @@ export function subscribe(url, opts) {
 
     client.on('event', function (event) {
       const recvUnixMs = Date.now();
-      let parsed = null;
-      try {
-        parsed = JSON.parse(event.data);
-      } catch (e) {
-        // Non-JSON frames (e.g. keepalive comments) are silently ignored.
+
+      // Only interested in signal patches — elements patches carry HTML
+      // hydration that doesn't move our SLO metrics.
+      if (event.name !== EVT_SIGNALS) {
+        // Track received-events count for visibility but do nothing else.
+        if (event.name === EVT_ELEMENTS) {
+          sseEventsReceived.add(1, Object.assign({ kind: 'elements' }, opts.tags || {}));
+        }
         return;
       }
 
-      sseEventsReceived.add(1, opts.tags || {});
+      // `event.data` for signal patches is exactly: "signals " + <single-line JSON>.
+      // Strip the leading "signals " (8 chars) before parsing.
+      let payload = event.data || '';
+      if (payload.startsWith('signals ')) {
+        payload = payload.slice('signals '.length);
+      }
 
-      // Track lag from server_unix_ms -> client receive
+      let parsed = null;
+      try {
+        parsed = JSON.parse(payload);
+      } catch (e) {
+        return;
+      }
+
+      sseEventsReceived.add(1, Object.assign({ kind: 'signals' }, opts.tags || {}));
+
+      // Lag from server-stamped time → client receive.
       if (parsed && typeof parsed.server_unix_ms === 'number') {
         sseEventLagMs.add(recvUnixMs - parsed.server_unix_ms, opts.tags || {});
       }
 
-      // Sequence gap / duplicate detection.
+      // Sequence-gap / duplicate detection.
       if (parsed && typeof parsed.seq === 'number') {
         if (seen[parsed.seq]) {
           sseDuplicateEvent.add(1, opts.tags || {});
@@ -105,13 +129,13 @@ export function subscribe(url, opts) {
         client.close();
       }
 
-      // Slow-reader simulation: throttle to ~1 event/sec by busy-waiting
-      // a small amount inside the event handler. We avoid k6's `sleep`
-      // here because it would block the iteration scheduler too.
+      // Slow-reader simulation for hot-match-fanout scenarios. Busy-wait
+      // inside the event handler (k6's sleep() blocks the iteration
+      // scheduler too aggressively).
       if (opts.slowReader) {
         const target = recvUnixMs + 1000;
         while (Date.now() < target) {
-          /* spin briefly */
+          /* spin */
         }
       }
     });
@@ -124,26 +148,9 @@ export function subscribe(url, opts) {
   return res;
 }
 
-// lastEventIDHeader returns a header object suitable for resuming an
-// SSE stream from a known seq. Pass null/undefined to omit.
+// lastEventIDHeader returns a header object suitable for resuming an SSE
+// stream from a known seq. Pass null/undefined to omit.
 export function lastEventIDHeader(seq) {
   if (seq === null || seq === undefined) return {};
   return { 'Last-Event-ID': String(seq) };
 }
-
-// -----------------------------------------------------------------------
-// Fallback (informational only — not wired): if k6/experimental/sse is
-// unavailable, you can implement SSE consumption with k6/http by issuing
-// a normal GET against /games/{id}/sse and reading the response body in
-// streaming mode. k6's standard http module does not expose chunked
-// streaming, so the practical fallback is to:
-//
-//   1. Build a custom k6 binary (xk6) including the `xk6-sse` extension.
-//   2. Or, use a WebSocket bridge: `k6/ws` against a `/games/{id}/ws`
-//      endpoint that mirrors SSE events.
-//   3. Or, poll `/games/{id}/snapshot` at a fixed cadence (loses lag SLO
-//      meaning — only useful as a smoke test).
-//
-// We deliberately do NOT implement option 3 here because it would
-// silently mask SSE-specific bugs (sequence gaps, slow-reader fanout,
-// reconnect-resume). Prefer keeping the experimental module.
