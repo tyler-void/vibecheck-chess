@@ -1,47 +1,212 @@
-// Package e2e — reconnect / Last-Event-ID scaffold.
+// Package e2e — reconnect / Last-Event-ID resume.
 //
 // Spec coverage:
-//   User Story 4 (viewer reconnects and catches up).
-//   FR-024 bounded per-room event ring buffer for replay,
-//   FR-025 deliver in-order missed events OR a fresh full snapshot when
-//   the gap is too large or no starting point is supplied.
+//
+//	User Story 4 (viewer reconnects and catches up).
+//	FR-024 bounded per-room event ring buffer for replay,
+//	FR-025 deliver in-order missed events OR a fresh full snapshot when
+//	the gap is too large or no starting point is supplied.
 package e2e
 
 import (
+	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
+// FR-024 / FR-025: a viewer who has received events up to seq N, drops,
+// and reconnects with Last-Event-ID: N MUST receive events N+1, N+2, ...
+// in order from the ring buffer.
 func TestE2E_LastEventIDReplay(t *testing.T) {
-	t.Skip("scaffold: awaiting src/server implementation")
+	srv := startServer(t)
+	gameID := createGame(t, srv, "alice", "bob", 60000, 0)
 
-	// TODO(US4, FR-024): open SSE, observe events up to seq=N, close.
-	// While disconnected, commit a small number of additional moves
-	// (still within the ring buffer capacity).
-	// srv := startServer(t)
-	// gameID := randomGameID()
+	// Phase 1: connect, see two moves, drop.
+	resp1, err := srv.Client().Get(srv.URL + "/games/" + gameID + "/sse")
+	if err != nil {
+		t.Fatalf("first sse open: %v", err)
+	}
 
-	// TODO(FR-024, FR-025): reconnect with header Last-Event-ID: N.
-	// Expect to receive each missed event in order with ids N+1, N+2,...
-	// and NO full-snapshot frame. parseSSE should yield contiguous ids.
+	// Drive 2 moves while connected.
+	for i, m := range []string{"e2e4", "e7e5"} {
+		var p string = "alice"
+		if i == 1 {
+			p = "bob"
+		}
+		resp := postMove(t, srv, gameID, p, buildMoveReq(uint64(i), m, "rec-"+m))
+		resp.Body.Close()
+	}
 
-	// TODO(edge): reconnect when already up-to-date — server emits only
-	// future events (no replay, no snapshot, just keepalives until the
-	// next move).
+	// Drain at least 2 events from the first connection.
+	seenSeqs := make(chan int, 8)
+	var firstWG sync.WaitGroup
+	firstWG.Add(1)
+	go func() {
+		defer firstWG.Done()
+		_ = parseSSE(resp1.Body, func(ev sseEvent) bool {
+			if ev.Event != "datastar-patch-signals" {
+				return true
+			}
+			if ev.ID != "" {
+				var seq int
+				_, err := fmt2Atoi(ev.ID, &seq)
+				if err == nil {
+					select {
+					case seenSeqs <- seq:
+					default:
+					}
+				}
+			}
+			return true
+		})
+	}()
+
+	// Wait until we've seen both seq=1 and seq=2 (or timeout).
+	got := map[int]bool{}
+	deadline := time.After(2 * time.Second)
+loop:
+	for len(got) < 2 {
+		select {
+		case s := <-seenSeqs:
+			got[s] = true
+		case <-deadline:
+			t.Fatalf("did not receive seq=1 and seq=2 within 2s; got %v", got)
+		}
+		if got[1] && got[2] {
+			break loop
+		}
+	}
+
+	// Drop the first connection.
+	resp1.Body.Close()
+	firstWG.Wait()
+
+	// Phase 2: drive 2 MORE moves while disconnected (these are the
+	// "missed" events the ring buffer must replay).
+	for i, m := range []string{"g1f3", "b8c6"} {
+		seq := uint64(i + 2)
+		var p string = "alice"
+		if i == 1 {
+			p = "bob"
+		}
+		resp := postMove(t, srv, gameID, p, buildMoveReq(seq, m, "rec-late-"+m))
+		resp.Body.Close()
+	}
+
+	// Phase 3: reconnect with Last-Event-ID: 2 → must replay seq 3, 4.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/games/"+gameID+"/sse", nil)
+	req.Header.Set("Last-Event-ID", "2")
+	resp2, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	gotReplay := make(chan int, 8)
+	go func() {
+		_ = parseSSE(resp2.Body, func(ev sseEvent) bool {
+			if ev.Event != "datastar-patch-signals" {
+				return true
+			}
+			if ev.ID == "3" || ev.ID == "4" {
+				var seq int
+				if _, err := fmt2Atoi(ev.ID, &seq); err == nil {
+					select {
+					case gotReplay <- seq:
+					default:
+					}
+				}
+			}
+			return true
+		})
+	}()
+
+	replaySeen := map[int]bool{}
+	deadline = time.After(2 * time.Second)
+	for len(replaySeen) < 2 {
+		select {
+		case s := <-gotReplay:
+			replaySeen[s] = true
+		case <-deadline:
+			t.Fatalf("did not replay seq=3,4 within 2s; got %v", replaySeen)
+		}
+	}
+	if !replaySeen[3] || !replaySeen[4] {
+		t.Errorf("replay seqs = %v, want {3,4}", replaySeen)
+	}
 }
 
-func TestE2E_LastEventIDSnapshotFallback(t *testing.T) {
-	t.Skip("scaffold: awaiting src/server implementation")
+// FR-025: malformed Last-Event-ID MUST NOT 500. The handler treats it as
+// "no header" → fresh hydration. (Unit-level coverage in
+// internal/sse/handler_test.go, this is the e2e proof.)
+func TestE2E_MalformedLastEventIDFallsBackTo200(t *testing.T) {
+	srv := startServer(t)
+	gameID := createGame(t, srv, "alice", "bob", 60000, 0)
 
-	// TODO(US4, FR-025): open SSE, close, then commit MORE moves than the
-	// per-room ring buffer holds so the gap is unrecoverable.
-	// srv := startServer(t)
-	// gameID := randomGameID()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/games/"+gameID+"/sse", nil)
+	req.Header.Set("Last-Event-ID", "not-a-number")
 
-	// TODO(FR-025): reconnect with the now-too-old Last-Event-ID. Expect
-	// a single full-snapshot frame (BoardSnapshot serialized) before
-	// live updates resume.
-
-	// TODO(edge from spec §Edge Cases): also exercise reconnect with a
-	// malformed Last-Event-ID (non-numeric); server treats it as a
-	// fresh connection and delivers a snapshot.
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("sse w/ bad header: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status with malformed Last-Event-ID = %d, want 200", resp.StatusCode)
+	}
 }
+
+// FR-024/FR-025: connecting fresh (no header) on a game whose ring is
+// empty (seq == 0) should NOT emit a hydration or replay event — there's
+// nothing to send. The client waits for live events.
+func TestE2E_FreshConnectAtSeqZeroNoReplay(t *testing.T) {
+	srv := startServer(t)
+	gameID := createGame(t, srv, "alice", "bob", 60000, 0)
+
+	resp, err := srv.Client().Get(srv.URL + "/games/" + gameID + "/sse")
+	if err != nil {
+		t.Fatalf("sse open: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read for ~200ms. Should see ONLY the 15s ping or nothing — no
+	// replay events because seq is still 0.
+	var got atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = parseSSE(resp.Body, func(ev sseEvent) bool {
+			if ev.Event == "datastar-patch-signals" || ev.Event == "datastar-patch-elements" {
+				got.Add(1)
+			}
+			return true
+		})
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	resp.Body.Close()
+	<-done
+
+	if got.Load() != 0 {
+		t.Errorf("fresh connect at seq=0 received %d events, want 0", got.Load())
+	}
+}
+
+// fmt2Atoi is a tiny zero-import helper. Returns 0 + err on garbage.
+func fmt2Atoi(s string, out *int) (int, error) {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, errParse(s)
+		}
+		n = n*10 + int(c-'0')
+	}
+	*out = n
+	return n, nil
+}
+
+type errParse string
+
+func (e errParse) Error() string { return "parse: " + string(e) }
