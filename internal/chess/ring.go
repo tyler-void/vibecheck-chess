@@ -10,10 +10,10 @@ package chess
 // overflow. The ring is NOT safe for concurrent access — callers (always the
 // GameRoom) MUST hold the room's lock.
 type Ring[T any] struct {
-	items []T    // backing array of length cap
+	items []T      // backing array of length cap
 	seqs  []uint64 // seq[i] is the sequence number tagged on items[i] (0 means slot empty)
-	head  int    // index of the NEXT write position
-	size  int    // number of valid entries, <= cap(items)
+	head  int      // index of the NEXT write position
+	size  int      // number of valid entries, <= cap(items)
 }
 
 // NewRing constructs a Ring with the given capacity. cap must be > 0.

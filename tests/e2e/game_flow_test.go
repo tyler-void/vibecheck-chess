@@ -1,11 +1,12 @@
 // Package e2e — game flow.
 //
 // Spec coverage:
-//   User Story 1 (two-player authoritative game).
-//   FR-001 game creation, FR-005 UCI move input, FR-006 turn enforcement,
-//   FR-007 full chess legality, FR-009 terminal adjudication,
-//   FR-011 monotonic seq, FR-021/022 per-game broadcast, FR-023 seq tag,
-//   FR-036 resign, FR-037 draw offer/accept.
+//
+//	User Story 1 (two-player authoritative game).
+//	FR-001 game creation, FR-005 UCI move input, FR-006 turn enforcement,
+//	FR-007 full chess legality, FR-009 terminal adjudication,
+//	FR-011 monotonic seq, FR-021/022 per-game broadcast, FR-023 seq tag,
+//	FR-036 resign, FR-037 draw offer/accept.
 //
 // Drives Fool's Mate plus resign + draw-offer scenarios end-to-end through
 // the real HTTP + SSE surface.

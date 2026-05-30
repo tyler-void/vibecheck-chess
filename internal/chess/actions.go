@@ -20,6 +20,7 @@ import (
 //   - ErrStaleSequence  — req.Seq != current seq.
 //   - ErrGameOver       — Outcome already set.
 func (r *GameRoom) ApplyResign(ctx context.Context, req ActionReq, now time.Time) (ActionResult, error) {
+	start := time.Now()
 	r.mu.Lock()
 
 	if cached, ok := r.seenActions[req.ClientActionID]; ok {
@@ -67,6 +68,9 @@ func (r *GameRoom) ApplyResign(ctx context.Context, req ActionReq, now time.Time
 
 	r.mu.Unlock()
 	r.hub.Publish(bytes)
+	recordAction(ActionResign, start)
+	logActionAccepted(ActionResign, r.id, result.Seq)
+	logTerminal(r.id, result.Snapshot.Outcome, result.Snapshot.Termination, result.Seq)
 	return result, nil
 }
 
@@ -76,6 +80,7 @@ func (r *GameRoom) ApplyResign(ctx context.Context, req ActionReq, now time.Time
 //
 // Errors: ErrNotParticipant, ErrStaleSequence, ErrGameOver.
 func (r *GameRoom) ApplyDrawOffer(ctx context.Context, req ActionReq, now time.Time) (ActionResult, error) {
+	start := time.Now()
 	r.mu.Lock()
 
 	if cached, ok := r.seenActions[req.ClientActionID]; ok {
@@ -115,6 +120,8 @@ func (r *GameRoom) ApplyDrawOffer(ctx context.Context, req ActionReq, now time.T
 
 	r.mu.Unlock()
 	r.hub.Publish(bytes)
+	recordAction(ActionDrawOffer, start)
+	logActionAccepted(ActionDrawOffer, r.id, result.Seq)
 	return result, nil
 }
 
@@ -125,6 +132,7 @@ func (r *GameRoom) ApplyDrawOffer(ctx context.Context, req ActionReq, now time.T
 // Errors: ErrNotParticipant, ErrNoPendingOffer, ErrOwnOffer,
 // ErrStaleSequence, ErrGameOver.
 func (r *GameRoom) ApplyDrawAccept(ctx context.Context, req ActionReq, now time.Time) (ActionResult, error) {
+	start := time.Now()
 	r.mu.Lock()
 
 	if cached, ok := r.seenActions[req.ClientActionID]; ok {
@@ -176,5 +184,8 @@ func (r *GameRoom) ApplyDrawAccept(ctx context.Context, req ActionReq, now time.
 
 	r.mu.Unlock()
 	r.hub.Publish(bytes)
+	recordAction(ActionDrawAccept, start)
+	logActionAccepted(ActionDrawAccept, r.id, result.Seq)
+	logTerminal(r.id, result.Snapshot.Outcome, result.Snapshot.Termination, result.Seq)
 	return result, nil
 }

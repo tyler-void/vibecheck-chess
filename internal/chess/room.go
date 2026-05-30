@@ -53,11 +53,11 @@ type GameRoom struct {
 	id          GameID
 	players     [2]PlayerID
 
-	seq            uint64
-	drawOfferAtSeq uint64
-	outcome        Outcome
-	termination    TerminationReason
-	drawOfferFrom  Color
+	seq             uint64
+	drawOfferAtSeq  uint64
+	outcome         Outcome
+	termination     TerminationReason
+	drawOfferFrom   Color
 	drawOfferActive bool
 
 	mu sync.RWMutex

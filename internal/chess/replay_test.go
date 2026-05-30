@@ -37,16 +37,21 @@ func TestReplayOrSnapshot_FreshSubscriberReplaysFromRing(t *testing.T) {
 
 	events, hydration := r.ReplayOrSnapshot(0, now)
 	if hydration != nil {
-		t.Fatalf("with full ring (4 events ≤ 128 capacity), expected replay (got hydration of %d bytes)", len(hydration))
+		t.Fatalf("with full ring (8 events ≤ 128 capacity), expected replay (got hydration of %d bytes)", len(hydration))
 	}
-	if len(events) != 4 {
-		t.Fatalf("replay returned %d events, want 4", len(events))
+	// Each accepted move emits TWO SSE events (signal patch + move-list
+	// element append), both tagged with the same seq id. 4 moves → 8 events.
+	if len(events) != 8 {
+		t.Fatalf("replay returned %d events, want 8 (2 per move × 4 moves)", len(events))
 	}
-	// Each event MUST be a Datastar wire frame for seq 1, 2, 3, 4 in order.
-	for i, ev := range events {
+	// Events MUST appear in pairs by seq: signal patch then element append.
+	for i := 0; i < 4; i++ {
 		wantID := []byte("id: " + uintToString(uint64(i+1)) + "\n")
-		if !bytes.Contains(ev, wantID) {
-			t.Errorf("event[%d] missing %q in %q", i, wantID, string(ev))
+		if !bytes.Contains(events[i*2], wantID) {
+			t.Errorf("events[%d] (signal patch) missing %q", i*2, wantID)
+		}
+		if !bytes.Contains(events[i*2+1], wantID) {
+			t.Errorf("events[%d] (movelist append) missing %q", i*2+1, wantID)
 		}
 	}
 }
@@ -120,12 +125,14 @@ func TestReplayOrSnapshot_OneBehindGetsOneEvent(t *testing.T) {
 	if hydration != nil {
 		t.Errorf("one-behind: expected replay, got hydration of %d bytes", len(hydration))
 	}
-	if len(events) != 1 {
-		t.Fatalf("one-behind: got %d events, want 1", len(events))
+	// One move behind = 2 SSE events to replay (signal + move-list append).
+	if len(events) != 2 {
+		t.Fatalf("one-behind: got %d events, want 2 (signal + movelist for seq=2)", len(events))
 	}
-	// The single returned event MUST be seq=2.
-	if !bytes.Contains(events[0], []byte("id: 2\n")) {
-		t.Errorf("one-behind event content: %q", events[0])
+	for i, ev := range events {
+		if !bytes.Contains(ev, []byte("id: 2\n")) {
+			t.Errorf("event[%d] missing 'id: 2': %q", i, ev)
+		}
 	}
 }
 

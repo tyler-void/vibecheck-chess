@@ -64,8 +64,11 @@ type ActionReq struct {
 func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (ActionResult, error) {
 	// Defensive syntax check (cheap; HTTP layer should have done this).
 	if err := ValidateUCISyntax(req.Move); err != nil {
+		recordMoveOutcome(MoveOutcomeBadSyntax)
 		return ActionResult{}, err
 	}
+
+	start := time.Now()
 
 	r.mu.Lock()
 
@@ -93,6 +96,7 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 	// Sequence check: client must have observed our latest state.
 	if req.Seq != r.seq {
 		r.mu.Unlock()
+		recordMoveOutcome(MoveOutcomeStale)
 		return ActionResult{}, ErrStaleSequence
 	}
 
@@ -100,6 +104,7 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 	// not PlayerID, because we already resolved color above.
 	if color != r.clocks.Active {
 		r.mu.Unlock()
+		recordMoveOutcome(MoveOutcomeNotTurn)
 		return ActionResult{}, ErrNotYourTurn
 	}
 
@@ -116,12 +121,14 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 		r.recent.Append(snap.Seq, SSEEvent{Seq: snap.Seq, Bytes: bytes})
 		r.mu.Unlock()
 		r.hub.Publish(bytes)
+		recordMoveOutcome(MoveOutcomeFlagged)
 		return ActionResult{}, ErrFlagged
 	}
 
 	// Push the move. Use the safe (validating) path on untrusted input.
 	if err := r.game.PushNotationMove(req.Move, libchess.UCINotation{}, nil); err != nil {
 		r.mu.Unlock()
+		recordMoveOutcome(MoveOutcomeIllegal)
 		return ActionResult{}, ErrIllegalMove
 	}
 
@@ -149,8 +156,16 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 	r.resetFlagTimerLocked(now)
 
 	snap := r.snapshotLocked(now)
-	bytes := dsenc.PatchSignalsBytes(snap.Seq, snap.toSignalsJSON())
-	r.recent.Append(snap.Seq, SSEEvent{Seq: snap.Seq, Bytes: bytes})
+	signalsBytes := dsenc.PatchSignalsBytes(snap.Seq, snap.toSignalsJSON())
+	r.recent.Append(snap.Seq, SSEEvent{Seq: snap.Seq, Bytes: signalsBytes})
+
+	// UX polish: append the move to the on-page move list. Two SSE events
+	// per move (signal patch + element append) — both share the same seq
+	// id, both go into the ring so Last-Event-ID resume replays them in
+	// order. Constitution V holds: each event is encoded once and the
+	// same []byte is broadcast to every subscriber.
+	moveListBytes := buildMoveListAppend(snap.Seq, req.Move)
+	r.recent.Append(snap.Seq, SSEEvent{Seq: snap.Seq, Bytes: moveListBytes})
 
 	result := ActionResult{Seq: snap.Seq, Snapshot: snap}
 	r.rememberAction(req.ClientActionID, result)
@@ -159,7 +174,15 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 
 	// Broadcast outside the lock. Constitution V — same bytes for every
 	// subscriber. Constitution III — never hold the room lock during I/O.
-	r.hub.Publish(bytes)
+	r.hub.Publish(signalsBytes)
+	r.hub.Publish(moveListBytes)
+
+	recordMoveOutcome(MoveOutcomeOK)
+	recordAction(ActionMove, start)
+	logActionAccepted(ActionMove, r.id, result.Seq)
+	if result.Snapshot.Outcome != Ongoing {
+		logTerminal(r.id, result.Snapshot.Outcome, result.Snapshot.Termination, result.Seq)
+	}
 
 	return result, nil
 }

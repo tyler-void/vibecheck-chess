@@ -115,12 +115,14 @@ func (s *Server) handleReadyz(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	_, _ = w.Write([]byte("not ready\n"))
 }
 
-// handleMetrics is a placeholder that Phase 9 (T085) will replace with the
-// real Prometheus exposition. Returning an empty 200 here keeps scrapers
-// happy while the registry is being built.
-func (s *Server) handleMetrics(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	w.WriteHeader(stdhttp.StatusOK)
+// handleMetrics serves the Prometheus exposition from our Registry
+// (Phase 9 T085). Replaces the Phase 2 placeholder.
+func (s *Server) handleMetrics(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	// Update gauges that need a fresh read at scrape time.
+	if s.Manager != nil {
+		MetricGamesActive.Set(float64(s.Manager.Count()))
+	}
+	MetricsHandler().ServeHTTP(w, r)
 }
 
 // handleSSE dispatches GET /games/{id}/sse to the per-room subscribe

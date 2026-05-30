@@ -26,13 +26,13 @@ import (
 
 func main() {
 	var (
-		addr            = flag.String("addr", ":8080", "TCP listen address")
-		staticRoot      = flag.String("static", "./web", "Filesystem path served at /static/")
-		shutdownGrace   = flag.Duration("shutdown-grace", 5*time.Second, "Maximum time to drain in-flight requests on SIGINT")
-		readHeaderTime  = flag.Duration("read-header-timeout", 5*time.Second, "Per-request read-header deadline (mitigates Slowloris)")
-		writeTimeout    = flag.Duration("write-timeout", 0, "Per-request write deadline; 0 = no deadline (SSE streams need this)")
-		logLevel        = flag.String("log-level", "info", "Log verbosity: debug | info | warn | error")
-		_               = writeTimeout // SSE handlers use ResponseController per-write deadlines instead
+		addr           = flag.String("addr", ":8080", "TCP listen address")
+		staticRoot     = flag.String("static", "./web", "Filesystem path served at /static/")
+		shutdownGrace  = flag.Duration("shutdown-grace", 5*time.Second, "Maximum time to drain in-flight requests on SIGINT")
+		readHeaderTime = flag.Duration("read-header-timeout", 5*time.Second, "Per-request read-header deadline (mitigates Slowloris)")
+		writeTimeout   = flag.Duration("write-timeout", 0, "Per-request write deadline; 0 = no deadline (SSE streams need this)")
+		logLevel       = flag.String("log-level", "info", "Log verbosity: debug | info | warn | error")
+		_              = writeTimeout // SSE handlers use ResponseController per-write deadlines instead
 	)
 	flag.Parse()
 
@@ -44,6 +44,28 @@ func main() {
 		Logger:     logger,
 		StaticRoot: *staticRoot,
 	})
+
+	// Wire Prometheus metric increments + slog hot-path logging to the
+	// chess package's metric/log hooks. The chess package doesn't import
+	// either backend directly — it emits to these callbacks.
+	chess.Metrics = chess.MetricsHooks{
+		ActionAccepted: func(kind chess.ActionKind, d time.Duration) {
+			http.MetricActionsAccepted.WithLabelValues(string(kind)).Inc()
+			http.MetricApplyActionDuration.WithLabelValues(string(kind)).Observe(d.Seconds())
+		},
+		MoveOutcome: func(outcome chess.MoveOutcome) {
+			http.MetricMovesAccepted.WithLabelValues(string(outcome)).Inc()
+		},
+	}
+	chess.Log = chess.LogHooks{
+		ActionAccepted: func(kind chess.ActionKind, fields ...slog.Attr) {
+			logger.LogAttrs(context.Background(), slog.LevelInfo, "action.accepted",
+				append([]slog.Attr{slog.String("kind", string(kind))}, fields...)...)
+		},
+		TerminalReached: func(fields ...slog.Attr) {
+			logger.LogAttrs(context.Background(), slog.LevelInfo, "game.terminal", fields...)
+		},
+	}
 
 	httpServer := &stdhttp.Server{
 		Addr:              *addr,

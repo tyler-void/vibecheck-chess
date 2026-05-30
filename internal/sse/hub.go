@@ -14,10 +14,10 @@ import (
 // I/O speed. mu is never held while writing to a socket — that's the
 // handler's job, downstream of the channel receive.
 type FanoutHub struct {
-	mu       sync.RWMutex
-	clients  map[ClientID]*SSEClient
-	nextID   atomic.Uint64
-	dropped  atomic.Uint64 // total slow-reader drops, exported via Hub.DroppedCount
+	mu      sync.RWMutex
+	clients map[ClientID]*SSEClient
+	nextID  atomic.Uint64
+	dropped atomic.Uint64 // total slow-reader drops, exported via Hub.DroppedCount
 }
 
 // NewFanoutHub constructs an empty hub.

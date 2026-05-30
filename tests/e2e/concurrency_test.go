@@ -1,12 +1,13 @@
 // Package e2e — optimistic concurrency + idempotency.
 //
 // Spec coverage:
-//   FR-013 same client_action_id => single applied move, identical result.
-//   FR-014 at most one transition commits per seq.
-//   SC-006 retried action with same idempotency key => exactly one applied
-//   in 100% of retry cases.
-//   SC-007 two concurrent submissions on same prior seq => exactly one
-//   committed, the other gets ErrStaleSequence in 100% of cases.
+//
+//	FR-013 same client_action_id => single applied move, identical result.
+//	FR-014 at most one transition commits per seq.
+//	SC-006 retried action with same idempotency key => exactly one applied
+//	in 100% of retry cases.
+//	SC-007 two concurrent submissions on same prior seq => exactly one
+//	committed, the other gets ErrStaleSequence in 100% of cases.
 package e2e
 
 import (

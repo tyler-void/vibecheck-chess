@@ -23,9 +23,9 @@ type errorEnvelope struct {
 }
 
 type errorBody struct {
-	Code            string                `json:"code"`
-	Message         string                `json:"message"`
-	CurrentSnapshot *chess.BoardSnapshot  `json:"current_snapshot,omitempty"`
+	Code            string               `json:"code"`
+	Message         string               `json:"message"`
+	CurrentSnapshot *chess.BoardSnapshot `json:"current_snapshot,omitempty"`
 }
 
 // writeJSONError renders the standard error envelope. status is the HTTP
@@ -44,9 +44,9 @@ func writeJSONError(w stdhttp.ResponseWriter, status int, code, msg string, snap
 
 // createGameReq is the JSON body for game creation.
 type createGameReq struct {
-	GameID      chess.GameID `json:"game_id,omitempty"` // optional; server assigns if missing
-	White       chess.PlayerID `json:"white"`
-	Black       chess.PlayerID `json:"black"`
+	GameID      chess.GameID    `json:"game_id,omitempty"` // optional; server assigns if missing
+	White       chess.PlayerID  `json:"white"`
+	Black       chess.PlayerID  `json:"black"`
 	TimeControl timeControlJSON `json:"time_control"`
 }
 
@@ -57,8 +57,8 @@ type timeControlJSON struct {
 }
 
 type createGameResp struct {
-	GameID   chess.GameID         `json:"game_id"`
-	Snapshot chess.BoardSnapshot  `json:"snapshot"`
+	GameID   chess.GameID        `json:"game_id"`
+	Snapshot chess.BoardSnapshot `json:"snapshot"`
 }
 
 func (s *Server) handleCreateGame(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -120,8 +120,8 @@ func randomGameID() string {
 // === GET /games/{id}/snapshot — current state =========================
 
 type snapshotResp struct {
-	GameID   chess.GameID         `json:"game_id"`
-	Snapshot chess.BoardSnapshot  `json:"snapshot"`
+	GameID   chess.GameID        `json:"game_id"`
+	Snapshot chess.BoardSnapshot `json:"snapshot"`
 }
 
 func (s *Server) handleSnapshot(w stdhttp.ResponseWriter, r *stdhttp.Request) {

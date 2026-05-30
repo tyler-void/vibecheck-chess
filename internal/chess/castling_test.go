@@ -54,7 +54,10 @@ func TestCastling_AfterKingMoveIllegal(t *testing.T) {
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	r := NewGameRoom("cs2", "w", "b", TimeControl{Initial: 5 * time.Minute}, now)
 
-	moves := []struct{ p PlayerID; m string }{
+	moves := []struct {
+		p PlayerID
+		m string
+	}{
 		{"w", "e2e4"}, {"b", "e7e5"},
 		{"w", "g1f3"}, {"b", "g8f6"},
 		{"w", "f1e2"}, {"b", "f8e7"},
