@@ -18,6 +18,7 @@ const (
 	ActionResign     ActionKind = "resign"
 	ActionDrawOffer  ActionKind = "draw_offer"
 	ActionDrawAccept ActionKind = "draw_accept"
+	ActionDrawClaim  ActionKind = "draw_claim"
 )
 
 // MoveOutcome is the discriminator for kiss_moves_accepted_total{outcome=...}.

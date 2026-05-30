@@ -5,38 +5,50 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KISS-Chess — Lobby</title>
   <link rel="stylesheet" href="/static/output.css">
-  <script type="module" src="/static/vendor/datastar.js"></script>
 </head>
 <body>
-  <main class="game-shell" data-signals="{create:{white:'',black:'',initial_ms:180000,increment_ms:2000},error:''}">
+  <main class="game-shell">
     <header class="mb-6">
       <h1 class="text-2xl font-semibold tracking-tight">KISS-Chess</h1>
       <p class="text-panel-muted text-sm">Single-node Go + Datastar + cm-chessboard. KISS by design.</p>
     </header>
 
     <section class="grid gap-6 md:grid-cols-2">
+      <!--
+        Create-game form. Pure vanilla JS for submission + redirect because
+        this is a one-off action: we POST JSON, parse the game_id from the
+        response, and navigate to /game/{id}?as={white}. No Datastar
+        reactivity needed here — Datastar takes over inside game.html for
+        the live game state.
+      -->
       <form
+        id="create-form"
         class="space-y-4 rounded-xl border border-panel-muted/30 p-6"
-        data-on-submit="@post('/games', {body: {white: $create.white, black: $create.black, time_control: {initial_ms: $create.initial_ms, increment_ms: $create.increment_ms, delay_ms: 0}}, headers: {Accept: 'application/json'}}); event.preventDefault()"
       >
         <h2 class="text-lg font-medium">Create a game</h2>
         <div class="grid gap-3">
           <label class="block">
             <span class="block text-sm text-panel-muted">White player id</span>
-            <input data-bind-create.white type="text" required class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2" placeholder="player-alice">
+            <input name="white" type="text" required value="alice"
+                   class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2"
+                   placeholder="player-alice">
           </label>
           <label class="block">
             <span class="block text-sm text-panel-muted">Black player id</span>
-            <input data-bind-create.black type="text" required class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2" placeholder="player-bob">
+            <input name="black" type="text" required value="bob"
+                   class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2"
+                   placeholder="player-bob">
           </label>
           <div class="grid grid-cols-2 gap-3">
             <label class="block">
               <span class="block text-sm text-panel-muted">Initial (ms)</span>
-              <input data-bind-create.initial_ms type="number" min="1000" class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2">
+              <input name="initial_ms" type="number" min="1000" value="180000"
+                     class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2">
             </label>
             <label class="block">
               <span class="block text-sm text-panel-muted">Increment (ms)</span>
-              <input data-bind-create.increment_ms type="number" min="0" class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2">
+              <input name="increment_ms" type="number" min="0" value="2000"
+                     class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2">
             </label>
           </div>
           <button type="submit" class="mt-2 rounded-md bg-panel-accent px-4 py-2 font-medium text-white">
@@ -46,16 +58,73 @@
       </form>
 
       <aside class="space-y-4 rounded-xl border border-panel-muted/30 p-6">
-        <h2 class="text-lg font-medium">Join an existing game</h2>
+        <h2 class="text-lg font-medium">After creation</h2>
         <p class="text-sm text-panel-muted">
-          Open <code class="rounded bg-panel/60 px-1">/game/&lt;id&gt;</code> in two browsers — one with
-          <code class="rounded bg-panel/60 px-1">?as=&lt;white-id&gt;</code>, the other with the black id.
+          You'll land on the white side of the new game.
+          On the game page you'll see <strong>"Share with opponent"</strong> — copy that link and open it
+          in another browser (or incognito) to play as black. Spectators visit the same URL
+          without <code class="rounded bg-panel/60 px-1">?as=</code>.
         </p>
-        <p class="text-sm text-panel-muted">Spectators just visit the URL without <code>?as=</code>.</p>
+        <p class="text-sm text-panel-muted">
+          Already have a game id?
+          <a class="text-panel-accent underline" href="/game/">Open one manually</a> (append the id).
+        </p>
       </aside>
     </section>
 
-    <div data-show="$error" class="toast" role="alert" data-text="$error"></div>
+    <div id="error" hidden class="toast" role="alert"></div>
   </main>
+
+  <script>
+    document.getElementById('create-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.currentTarget;
+      const errBox = document.getElementById('error');
+      errBox.hidden = true;
+
+      const body = {
+        white: f.white.value.trim(),
+        black: f.black.value.trim(),
+        time_control: {
+          initial_ms: Number(f.initial_ms.value),
+          increment_ms: Number(f.increment_ms.value),
+          delay_ms: 0,
+        },
+      };
+
+      let resp;
+      try {
+        resp = await fetch('/games', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+      } catch (netErr) {
+        errBox.textContent = 'Network error: ' + netErr.message;
+        errBox.hidden = false;
+        return;
+      }
+
+      if (!resp.ok) {
+        let msg = 'HTTP ' + resp.status;
+        try {
+          const e = await resp.json();
+          if (e && e.error && e.error.message) msg = e.error.message;
+        } catch {}
+        errBox.textContent = 'Create failed: ' + msg;
+        errBox.hidden = false;
+        return;
+      }
+
+      const data = await resp.json();
+      // Send the white player to their own view.
+      const target = '/game/' + encodeURIComponent(data.game_id)
+        + '?as=' + encodeURIComponent(body.white);
+      window.location.href = target;
+    });
+  </script>
 </body>
 </html>

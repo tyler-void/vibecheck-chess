@@ -29,6 +29,23 @@ type BoardSnapshot struct {
 	Turn          Color             `json:"turn"`
 	Outcome       Outcome           `json:"outcome"`
 	Termination   TerminationReason `json:"termination"`
+	// LegalMoves is the full UCI list of moves the side-to-move may play
+	// from the current position (~20-40 strings, e.g. ["e2e4","g1f3",...]).
+	// Promotion moves carry the promo-piece suffix ("e7e8q","e7e8r", etc.).
+	// Empty when Outcome != Ongoing. The client uses this to refuse illegal
+	// drag-and-drop attempts before cm-chessboard moves the piece, removing
+	// the snap-back flicker that arises from server-authoritative rejection.
+	LegalMoves []string `json:"legal_moves"`
+	// CheckSquare is the algebraic square ("e8", "g1", ...) of the king
+	// currently in check, or "" if no side is in check. Used by the client
+	// to paint a danger marker on the threatened king. Tracks the side-to-
+	// move; after a checking move it points at the receiving king.
+	CheckSquare string `json:"check_square"`
+	// CanClaimDraw is true when the side-to-move could legally claim a draw
+	// right now — either the current position has occurred 3+ times
+	// (threefold repetition) or the halfmove clock is at 100+ (fifty-move
+	// rule). Drives the optional "Claim draw" affordance on the client.
+	CanClaimDraw bool `json:"can_claim_draw"`
 }
 
 // signalsBufPool reuses []byte scratch buffers for toSignalsJSON. Sized to
@@ -73,6 +90,9 @@ func (s BoardSnapshot) toSignalsJSON() []byte {
 	b = appendKVString(b, "turn", s.Turn.String(), true)
 	b = appendKVInt(b, "outcome", int64(s.Outcome), true)
 	b = appendKVInt(b, "termination", int64(s.Termination), true)
+	b = appendKVStringArray(b, "legal_moves", s.LegalMoves, true)
+	b = appendKVString(b, "check_square", s.CheckSquare, true)
+	b = appendKVBool(b, "can_claim_draw", s.CanClaimDraw, true)
 	b = append(b, '}')
 
 	out := make([]byte, len(b))
@@ -132,6 +152,61 @@ func appendKVString(b []byte, k, v string, comma bool) []byte {
 		}
 	}
 	b = append(b, '"')
+	return b
+}
+
+func appendKVBool(b []byte, k string, v bool, comma bool) []byte {
+	if comma {
+		b = append(b, ',')
+	}
+	b = append(b, '"')
+	b = append(b, k...)
+	b = append(b, '"', ':')
+	if v {
+		return append(b, 't', 'r', 'u', 'e')
+	}
+	return append(b, 'f', 'a', 'l', 's', 'e')
+}
+
+// appendKVStringArray writes a key:[...] pair where each element is a JSON-
+// escaped string. Same defensive escaping as appendKVString — our UCI moves
+// are pure ASCII without quotes, but the escape branches keep future field
+// additions safe.
+func appendKVStringArray(b []byte, k string, vs []string, comma bool) []byte {
+	if comma {
+		b = append(b, ',')
+	}
+	b = append(b, '"')
+	b = append(b, k...)
+	b = append(b, '"', ':', '[')
+	for i, v := range vs {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = append(b, '"')
+		for j := 0; j < len(v); j++ {
+			c := v[j]
+			switch c {
+			case '"', '\\':
+				b = append(b, '\\', c)
+			case '\n':
+				b = append(b, '\\', 'n')
+			case '\r':
+				b = append(b, '\\', 'r')
+			case '\t':
+				b = append(b, '\\', 't')
+			default:
+				if c < 0x20 {
+					b = append(b, '\\', 'u', '0', '0',
+						hexDigit(c>>4), hexDigit(c&0xf))
+				} else {
+					b = append(b, c)
+				}
+			}
+		}
+		b = append(b, '"')
+	}
+	b = append(b, ']')
 	return b
 }
 

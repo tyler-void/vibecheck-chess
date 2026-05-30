@@ -32,14 +32,60 @@
 }
 
 @layer components {
-  .game-shell { @apply mx-auto max-w-5xl px-4 py-6; }
+  .game-shell { @apply mx-auto max-w-6xl px-4 py-6; }
+
+  /* Player chip — name on the left, clock on the right. Borders go
+     amber when the chip is the active side (CSS class `is-active`
+     applied from the per-frame tick loop). */
+  .player-chip {
+    @apply flex items-center justify-between gap-3;
+    @apply rounded-md border border-panel-muted/30 bg-panel/40 px-4 py-2;
+    @apply transition-colors duration-150;
+  }
+  .player-chip.is-active {
+    @apply border-board-last-to bg-board-last-to/10;
+  }
+  .player-name {
+    @apply font-medium text-base;
+  }
+  .player-clock {
+    @apply font-mono text-2xl tabular-nums tracking-tight;
+  }
+  .player-chip.is-active .player-clock {
+    @apply text-board-last-from;
+  }
 
   .clock           { @apply font-mono text-3xl tabular-nums tracking-tight; }
   .clock-active    { @apply text-board-last-to dark:text-board-last-from; }
   .clock-flagged   { @apply text-board-check; }
 
-  .move-list       { @apply font-mono text-sm leading-relaxed max-h-96 overflow-y-auto; }
-  .move-list li    { @apply px-2 py-0.5; }
+  /* Move list — chess.com / Lichess-style two-column grid: white moves
+     in the left column, black moves in the right, with a small
+     move-number gutter on every pair via a CSS counter. */
+  .move-list {
+    @apply font-mono text-sm leading-relaxed max-h-96 overflow-y-auto;
+    display: grid;
+    grid-template-columns: 2rem 1fr 1fr;
+    align-content: start;
+    gap: 0.125rem 0.5rem;
+    counter-reset: ply 0;
+  }
+  .move-list li[data-seq] {
+    @apply px-1 py-0.5;
+  }
+  /* Every WHITE move (odd seq) is preceded by a move-number cell. */
+  .move-list li[data-seq]:nth-of-type(odd) {
+    counter-increment: ply;
+  }
+  .move-list li[data-seq]:nth-of-type(odd)::before {
+    content: counter(ply) ".";
+    @apply text-panel-muted mr-1;
+  }
+  /* Empty state: show a subtle hint when no moves yet. */
+  .move-list:empty::after {
+    content: "No moves yet.";
+    @apply text-panel-muted text-xs italic px-2 py-1 col-span-3;
+  }
 
   .toast           { @apply fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border border-board-check/60 bg-panel/95 px-4 py-3 text-panel-fg shadow-lg; }
 

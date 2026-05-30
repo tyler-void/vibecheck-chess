@@ -48,4 +48,9 @@ var (
 	// ErrOwnOffer — submitter tried to accept their own pending offer.
 	// FR-037. Maps to HTTP 409.
 	ErrOwnOffer = errors.New("chess: cannot accept your own draw offer")
+
+	// ErrNoClaimableDraw — claim-draw submitted but neither threefold
+	// repetition nor the fifty-move rule applies to the current position.
+	// Maps to HTTP 409.
+	ErrNoClaimableDraw = errors.New("chess: no claimable draw at this position")
 )

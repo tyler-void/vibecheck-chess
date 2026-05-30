@@ -77,6 +77,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /games/{id}/resign", s.handleResign)
 	s.Mux.HandleFunc("POST /games/{id}/draw-offer/accept", s.handleDrawAccept) // more specific first
 	s.Mux.HandleFunc("POST /games/{id}/draw-offer", s.handleDrawOffer)
+	s.Mux.HandleFunc("POST /games/{id}/claim-draw", s.handleDrawClaim)
 
 	if s.staticRoot != "" {
 		fs := stdhttp.FileServer(stdhttp.Dir(s.staticRoot))
@@ -146,4 +147,7 @@ type roomAdapter struct{ inner *chess.GameRoom }
 func (a roomAdapter) Hub() *sse.FanoutHub { return a.inner.Hub() }
 func (a roomAdapter) ReplayOrSnapshot(lastSeq uint64, now time.Time) ([][]byte, []byte) {
 	return a.inner.ReplayOrSnapshot(lastSeq, now)
+}
+func (a roomAdapter) HydrateBytes(now time.Time) []byte {
+	return a.inner.HydrateBytes(now)
 }
