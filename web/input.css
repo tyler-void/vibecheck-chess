@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/* Source globs — Tailwind v4 auto-detects most paths; explicit for the Go-template HTML. */
+@source "../web/**/*.html";
+@source "../internal/**/*.go";
+
+/* Dark-mode via the `.dark` class on the page root (toggled by Datastar signal `$dark`). */
+@variant dark (&:where(.dark, .dark *));
+
+/* Theme tokens — replaces the v3 tailwind.config.js extend.colors block. */
+@theme {
+  --color-board-light:     #f0d9b5;
+  --color-board-dark:      #b58863;
+  --color-board-last-from: #cdd26a;
+  --color-board-last-to:   #aaa23a;
+  --color-board-check:     #ff5e5e;
+  --color-panel:           #1f1f23;
+  --color-panel-fg:        #e5e5e5;
+  --color-panel-muted:     #7d7d85;
+  --color-panel-accent:    #5b9bd5;
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply bg-white text-zinc-900 dark:bg-panel dark:text-panel-fg;
+    @apply min-h-screen antialiased;
+  }
+}
+
+@layer components {
+  .game-shell { @apply mx-auto max-w-5xl px-4 py-6; }
+
+  .clock           { @apply font-mono text-3xl tabular-nums tracking-tight; }
+  .clock-active    { @apply text-board-last-to dark:text-board-last-from; }
+  .clock-flagged   { @apply text-board-check; }
+
+  .move-list       { @apply font-mono text-sm leading-relaxed max-h-96 overflow-y-auto; }
+  .move-list li    { @apply px-2 py-0.5; }
+
+  .toast           { @apply fixed bottom-4 right-4 z-50 max-w-sm rounded-lg border border-board-check/60 bg-panel/95 px-4 py-3 text-panel-fg shadow-lg; }
+
+  .conn-dot                   { @apply inline-block h-2 w-2 rounded-full bg-zinc-400; }
+  .conn-dot[data-state="open"]   { @apply bg-emerald-500; }
+  .conn-dot[data-state="closed"] { @apply bg-red-500; }
+}

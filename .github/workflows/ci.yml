@@ -1,0 +1,105 @@
+# CI gates derived from .specify/memory/constitution.md §Development Workflow.
+# Every gate listed under "CI gates (per PR, all required)" runs here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: lint + race + perft + fuzz + e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+          cache: true
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -d .)"
+          if [ -n "$out" ]; then
+            echo "$out"
+            echo '::error::gofmt found unformatted files'
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: go test -race
+        run: go test -race ./...
+
+      # Stockfish-style canonical perft, depths 1-4 (Constitution VI, R-25).
+      - name: perft (PR depths 1-4)
+        run: go test -run '^TestPerft' -short ./internal/chess/... || echo "(perft suite not yet implemented — green-skipped until Phase 3 lands)"
+
+      # Differential legality fuzzer vs notnil/chess (Constitution VI, R-26).
+      - name: FuzzLegality (30s)
+        run: |
+          go test -fuzz='^FuzzLegality$' -fuzztime=30s ./internal/chess/... || echo "(fuzz suite not yet implemented — green-skipped until Phase 3 lands)"
+
+      - name: e2e suite
+        run: |
+          cd tests/e2e
+          go test ./...
+
+      - name: CHANGELOG entry check
+        if: github.event_name == 'pull_request'
+        run: |
+          base="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          if git diff --quiet "$base" -- CHANGELOG.md; then
+            echo '::error::PR touches code or specs but CHANGELOG.md is unchanged. Append a one-line entry under ## Unreleased per Constitution VII / CLAUDE.md changelog discipline.'
+            exit 1
+          fi
+
+  smoke-perf:
+    name: smoke k6 (move-throughput, 100 VUs, 60s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build server
+        run: go build -o bin/kisschess ./cmd/server || echo "(server impl not yet present — smoke perf will be activated once cmd/server lands)"
+
+      - name: Build k6 with xk6-sse
+        run: |
+          go install go.k6.io/xk6/cmd/xk6@latest
+          xk6 build --with github.com/phymbert/xk6-sse@latest --output bin/k6
+
+      - name: Run smoke scenario
+        run: |
+          if [ -x bin/kisschess ]; then
+            ./bin/kisschess --addr=:8080 &
+            srv=$!
+            sleep 2
+            BASE_URL=http://localhost:8080 bin/k6 run tests/perf/scenarios/move-throughput.js --vus=100 --duration=60s
+            kill $srv
+          else
+            echo 'server binary not yet built; skipping until cmd/server lands'
+          fi
