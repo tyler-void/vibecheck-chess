@@ -21,9 +21,8 @@ type GameID string
 // Authorisation is upstream of this package; we trust the value provided.
 type PlayerID string
 
-// ClientID identifies one connected SSE subscriber for one game. Assigned by
-// the FanoutHub via an atomic counter.
-type ClientID uint64
+// ClientID lives in internal/sse — the chess package does not depend on the
+// transport layer. See sse.ClientID.
 
 // Color is the side a player plays. White is 0, Black is 1 — chosen so the
 // value can index a [2]T array directly without a switch.

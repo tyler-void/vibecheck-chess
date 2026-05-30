@@ -3,8 +3,6 @@ package sse
 import (
 	"sync"
 	"sync/atomic"
-
-	"kisschess/internal/chess"
 )
 
 // FanoutHub is the per-game broadcaster. Owns the set of currently connected
@@ -17,7 +15,7 @@ import (
 // handler's job, downstream of the channel receive.
 type FanoutHub struct {
 	mu       sync.RWMutex
-	clients  map[chess.ClientID]*SSEClient
+	clients  map[ClientID]*SSEClient
 	nextID   atomic.Uint64
 	dropped  atomic.Uint64 // total slow-reader drops, exported via Hub.DroppedCount
 }
@@ -25,7 +23,7 @@ type FanoutHub struct {
 // NewFanoutHub constructs an empty hub.
 func NewFanoutHub() *FanoutHub {
 	return &FanoutHub{
-		clients: make(map[chess.ClientID]*SSEClient),
+		clients: make(map[ClientID]*SSEClient),
 	}
 }
 
@@ -33,7 +31,7 @@ func NewFanoutHub() *FanoutHub {
 // eventually call Unregister(client.ID) — typically via a `defer` on the
 // HTTP handler — to release the slot.
 func (h *FanoutHub) Register() *SSEClient {
-	id := chess.ClientID(h.nextID.Add(1))
+	id := ClientID(h.nextID.Add(1))
 	c := &SSEClient{
 		ID:   id,
 		Send: make(chan []byte, sendBufferSize),
@@ -46,7 +44,7 @@ func (h *FanoutHub) Register() *SSEClient {
 
 // Unregister removes a subscriber and closes its Send channel. Safe to call
 // even if the subscriber is not in the map (idempotent).
-func (h *FanoutHub) Unregister(id chess.ClientID) {
+func (h *FanoutHub) Unregister(id ClientID) {
 	h.mu.Lock()
 	c, ok := h.clients[id]
 	if ok {

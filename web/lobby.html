@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KISS-Chess — Lobby</title>
+  <link rel="stylesheet" href="/static/output.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+  <main class="game-shell" data-signals="{create:{white:'',black:'',initial_ms:180000,increment_ms:2000},error:''}">
+    <header class="mb-6">
+      <h1 class="text-2xl font-semibold tracking-tight">KISS-Chess</h1>
+      <p class="text-panel-muted text-sm">Single-node Go + Datastar + cm-chessboard. KISS by design.</p>
+    </header>
+
+    <section class="grid gap-6 md:grid-cols-2">
+      <form
+        class="space-y-4 rounded-xl border border-panel-muted/30 p-6"
+        data-on-submit="@post('/games', {body: {white: $create.white, black: $create.black, time_control: {initial_ms: $create.initial_ms, increment_ms: $create.increment_ms, delay_ms: 0}}, headers: {Accept: 'application/json'}}); event.preventDefault()"
+      >
+        <h2 class="text-lg font-medium">Create a game</h2>
+        <div class="grid gap-3">
+          <label class="block">
+            <span class="block text-sm text-panel-muted">White player id</span>
+            <input data-bind-create.white type="text" required class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2" placeholder="player-alice">
+          </label>
+          <label class="block">
+            <span class="block text-sm text-panel-muted">Black player id</span>
+            <input data-bind-create.black type="text" required class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2" placeholder="player-bob">
+          </label>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="block">
+              <span class="block text-sm text-panel-muted">Initial (ms)</span>
+              <input data-bind-create.initial_ms type="number" min="1000" class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2">
+            </label>
+            <label class="block">
+              <span class="block text-sm text-panel-muted">Increment (ms)</span>
+              <input data-bind-create.increment_ms type="number" min="0" class="mt-1 w-full rounded-md border border-panel-muted/30 bg-transparent px-3 py-2">
+            </label>
+          </div>
+          <button type="submit" class="mt-2 rounded-md bg-panel-accent px-4 py-2 font-medium text-white">
+            Create game
+          </button>
+        </div>
+      </form>
+
+      <aside class="space-y-4 rounded-xl border border-panel-muted/30 p-6">
+        <h2 class="text-lg font-medium">Join an existing game</h2>
+        <p class="text-sm text-panel-muted">
+          Open <code class="rounded bg-panel/60 px-1">/game/&lt;id&gt;</code> in two browsers — one with
+          <code class="rounded bg-panel/60 px-1">?as=&lt;white-id&gt;</code>, the other with the black id.
+        </p>
+        <p class="text-sm text-panel-muted">Spectators just visit the URL without <code>?as=</code>.</p>
+      </aside>
+    </section>
+
+    <div data-show="$error" class="toast" role="alert" data-text="$error"></div>
+  </main>
+</body>
+</html>

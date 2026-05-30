@@ -11,14 +11,18 @@ package sse
 import (
 	"sync"
 	"sync/atomic"
-
-	"kisschess/internal/chess"
 )
 
 // sendBufferSize is the per-subscriber outbound queue capacity. Sized to
 // cover roughly 16 moves of headroom at typical play cadence; one missed
 // publish attempt and the client is dropped (Constitution IV).
 const sendBufferSize = 16
+
+// ClientID identifies one connected SSE subscriber for one game. Assigned
+// by the FanoutHub via an atomic counter. Lives in this package (rather
+// than internal/chess) so internal/sse does not depend on internal/chess
+// — chess imports sse to register subscribers from the room.
+type ClientID uint64
 
 // SSEClient is one subscriber attached to one game's FanoutHub. Created by
 // Hub.Register and owned by that hub until Unregister.
@@ -27,7 +31,7 @@ const sendBufferSize = 16
 // and writes to the response. When the hub drops a slow reader it closes
 // Send; the handler then exits its range loop and tears down the connection.
 type SSEClient struct {
-	ID      chess.ClientID
+	ID      ClientID
 	Send    chan []byte
 	LastSeq atomic.Uint64 // best-effort, for /metrics and diagnostics
 	once    sync.Once

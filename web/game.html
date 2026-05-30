@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KISS-Chess — Game {{.GameID}}</title>
+  <link rel="stylesheet" href="/static/output.css">
+  <link rel="stylesheet" href="/static/vendor/cm-chessboard/assets/chessboard.css">
+  <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+  <main
+    id="game-root"
+    class="game-shell"
+    data-signals='{"seq":{{.Snapshot.Seq}},"server_unix_ms":{{.Snapshot.ServerUnixMS}},"active_expires_at_unix_ms":{{.Snapshot.ActiveExpiresAtUnixMS}},"white_ms":{{.Snapshot.WhiteMS}},"black_ms":{{.Snapshot.BlackMS}},"turn":"{{.Snapshot.Turn}}","outcome":{{.Snapshot.Outcome}},"termination":{{.Snapshot.Termination}},"last_move":"{{.Snapshot.LastMove}}","fen":"{{.Snapshot.FEN}}","draw_offer_from":"{{.Snapshot.DrawOfferFrom}}","intended_move":""}'
+    data-on-load="@get('/games/{{.GameID}}/sse', {openWhenHidden: true})"
+  >
+    <header class="mb-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight">Game <code class="font-mono text-base">{{.GameID}}</code></h1>
+        <p class="text-panel-muted text-sm">You: <code>{{.As}}</code> · Turn: <span data-text="$turn === 'w' ? 'White' : 'Black'"></span></p>
+      </div>
+      <span class="conn-dot" title="SSE connection"></span>
+    </header>
+
+    <section class="grid gap-6 md:grid-cols-[1fr_18rem]">
+      <div>
+        <!-- cm-chessboard renders into this div; data-effect re-positions it on every fen signal patch. -->
+        <div id="board" class="aspect-square w-full"
+             data-effect="window.__board && window.__board.setPosition($fen, true)"></div>
+
+        <!-- Simple move entry: UCI text input + send button. Replaces drag-and-drop until the
+             cm-chessboard wiring is done (deferred to a UX polish task). -->
+        <form
+          class="mt-3 flex gap-2"
+          data-on-submit="
+            @post('/games/{{.GameID}}/move', {
+              body: {seq: $seq, move: $intended_move, client_action_id: crypto.randomUUID()},
+              headers: {'X-Player-ID': '{{.As}}'}
+            });
+            $intended_move = '';
+            event.preventDefault()"
+        >
+          <input
+            data-bind-intended_move
+            class="flex-1 rounded-md border border-panel-muted/30 bg-transparent px-3 py-2 font-mono"
+            placeholder="e2e4 (UCI)"
+            pattern="[a-h][1-8][a-h][1-8][qrbn]?"
+            required>
+          <button type="submit" class="rounded-md bg-panel-accent px-4 py-2 font-medium text-white">
+            Send
+          </button>
+        </form>
+      </div>
+
+      <aside class="space-y-4">
+        <div class="flex justify-between">
+          <div>
+            <p class="text-xs uppercase text-panel-muted">White</p>
+            <p class="clock" data-text="formatClock($white_ms)" data-class-clock-active="$turn === 'w' && $outcome === 0"></p>
+          </div>
+          <div class="text-right">
+            <p class="text-xs uppercase text-panel-muted">Black</p>
+            <p class="clock" data-text="formatClock($black_ms)" data-class-clock-active="$turn === 'b' && $outcome === 0"></p>
+          </div>
+        </div>
+
+        <div data-show="$outcome !== 0" class="rounded-lg border border-board-last-from/40 bg-board-last-from/10 p-3 text-sm">
+          <p data-text="outcomeMessage($outcome, $termination)"></p>
+        </div>
+
+        <ul id="move-list" class="move-list rounded-md border border-panel-muted/30 p-2"></ul>
+
+        <!-- Draw-offer banner: shown only when the OPPONENT has a pending offer. -->
+        <div
+          data-show="$draw_offer_from !== '' && $draw_offer_from !== mySide('{{.As}}') && $outcome === 0"
+          class="rounded-lg border border-board-last-from/40 bg-board-last-from/10 p-3 text-sm"
+        >
+          <p class="mb-2">Opponent offers a draw.</p>
+          <button
+            class="rounded-md bg-panel-accent px-3 py-1 text-white"
+            data-on-click="@post('/games/{{.GameID}}/draw-offer/accept', {body: {seq: $seq, client_action_id: crypto.randomUUID()}, headers: {'X-Player-ID': '{{.As}}'}})"
+          >Accept draw</button>
+        </div>
+
+        <!-- Player controls — visible only while ongoing AND you are a participant. -->
+        <div
+          data-show="$outcome === 0 && mySide('{{.As}}') !== ''"
+          class="flex gap-2"
+        >
+          <button
+            class="rounded-md border border-panel-muted/30 px-3 py-1 text-sm"
+            data-on-click="if (confirm('Offer a draw?')) @post('/games/{{.GameID}}/draw-offer', {body: {seq: $seq, client_action_id: crypto.randomUUID()}, headers: {'X-Player-ID': '{{.As}}'}})"
+          >Offer draw</button>
+          <button
+            class="rounded-md border border-board-check/40 px-3 py-1 text-sm text-board-check"
+            data-on-click="if (confirm('Resign the game?')) @post('/games/{{.GameID}}/resign', {body: {seq: $seq, client_action_id: crypto.randomUUID()}, headers: {'X-Player-ID': '{{.As}}'}})"
+          >Resign</button>
+        </div>
+      </aside>
+    </section>
+
+    <div id="toast" data-show="$error" class="toast" role="alert"></div>
+  </main>
+
+  <script type="module">
+    // Bootstrap cm-chessboard once the page loads. Stashed on window so the
+    // Datastar `data-effect` above can call setPosition(fen) when the $fen
+    // signal patches in.
+    import {Chessboard, INPUT_EVENT_TYPE, COLOR} from '/static/vendor/cm-chessboard/src/Chessboard.js';
+    const el = document.getElementById('board');
+    const initialFen = el.closest('[data-signals]').getAttribute('data-signals');
+    const fen = JSON.parse(initialFen).fen;
+    window.__board = new Chessboard(el, {
+      position: fen,
+      assetsUrl: '/static/vendor/cm-chessboard/assets/',
+    });
+
+    // Tiny helpers Datastar expressions call:
+    window.formatClock = (ms) => {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${m}:${r.toString().padStart(2, '0')}`;
+    };
+    window.outcomeMessage = (outcome, termination) => {
+      const reasons = {
+        1: 'checkmate', 2: 'stalemate', 3: 'insufficient material',
+        4: 'fivefold repetition', 5: '75-move rule', 6: 'threefold repetition',
+        7: '50-move rule', 8: 'flag on time', 9: 'resignation', 10: 'agreed draw',
+      };
+      const reason = reasons[termination] ? ` (${reasons[termination]})` : '';
+      if (outcome === 1) return 'White wins' + reason;
+      if (outcome === 2) return 'Black wins' + reason;
+      if (outcome === 3) return 'Draw' + reason;
+      return '';
+    };
+    // mySide('alice') returns 'w'/'b'/'' so the UI knows which colour the
+    // viewer is playing (used to hide the resign button for spectators and
+    // to show the draw-accept banner only on the OPPOSITE side).
+    window.mySide = (asValue) => {
+      // The server-rendered template doesn't currently expose the player→colour
+      // mapping; for the MVP we treat asValue=='' as spectator and otherwise
+      // assume the asValue is one of the two participants — which side, the
+      // client doesn't know without a lookup. As a workaround the client
+      // checks $turn after each move: if you just moved, you were active.
+      // The banner is conservative — we show "accept" only when an offer
+      // exists AND we're a participant.
+      return asValue === '' ? '' : ($turn === 'w' ? 'b' : 'w');
+    };
+  </script>
+</body>
+</html>

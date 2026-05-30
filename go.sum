@@ -1,0 +1,7 @@
+github.com/ajstarks/svgo v0.0.0-20200320125537-f189e35d30ca/go.mod h1:K08gAheRH3/J6wwsYMMT4xOr94bZjxIelGM0+d/wbFw=
+github.com/corentings/chess/v2 v2.3.11 h1:puSaRimg5mme7JzC+M02qSoHIvSH7pk/PRMjQcr8i08=
+github.com/corentings/chess/v2 v2.3.11/go.mod h1:kc0OoyCO5rmcqub4L60Sb0dQL2sbPVX1OcbWmXc0OWc=
+github.com/notnil/chess v1.10.0 h1:RR3MgS9G6zZmJ+VPTJolyxdaIgxoUPyUUY+2iaw35G0=
+github.com/notnil/chess v1.10.0/go.mod h1:cRuJUIBFq9Xki05TWHJxHYkC+fFpq45IWwk94DdlCrA=
+golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a h1:+3jdDGGB8NGb1Zktc737jlt3/A5f6UlwSzmvqUuufxw=
+golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a/go.mod h1:d2fgXJLVs4dYDHUk5lwMIfzRzSrWCfGZb0ZqeLa/Vcw=

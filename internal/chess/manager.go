@@ -1,6 +1,9 @@
 package chess
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // GameManager is the per-node registry of active GameRooms.
 //
@@ -30,31 +33,32 @@ func (m *GameManager) Get(id GameID) (*GameRoom, bool) {
 	return r, ok
 }
 
-// CreateStub registers a room with the given id if and only if id is not
-// already taken. Returns the room that "won" — either the freshly-created
-// one or the pre-existing one.
+// Create registers a fresh room for id with the given participants and time
+// control. Returns the room that "won" — if id is already taken (race
+// between two POST /games requests with the same id), returns the existing
+// room and a `false` second return. Callers that race-lose can detect this
+// and either error out (HTTP 409 game_exists) or proceed against the
+// existing room.
 //
-// Phase 2 uses this stub-aware variant so the HTTP layer skeleton compiles.
-// Phase 3 introduces Create(id, white, black, tc) which calls NewGameRoom
-// internally and then registers via this same atomic check (T038).
-func (m *GameManager) CreateStub(id GameID) *GameRoom {
-	// Common path: room doesn't exist. Build the candidate outside the
-	// write lock to keep the critical section short.
-	candidate := newRoomStub(id)
+// The room is constructed OUTSIDE the write lock to keep the critical
+// section short — NewGameRoom allocates a chess.Game, maps, channel, and a
+// FanoutHub, none of which need the manager's mu.
+func (m *GameManager) Create(id GameID, white, black PlayerID, tc TimeControl, now time.Time) (*GameRoom, bool) {
+	candidate := NewGameRoom(id, white, black, tc, now)
 
 	m.mu.Lock()
 	if existing, ok := m.rooms[id]; ok {
 		m.mu.Unlock()
-		return existing
+		return existing, false
 	}
 	m.rooms[id] = candidate
 	m.mu.Unlock()
-	return candidate
+	return candidate, true
 }
 
 // Remove deletes the room for id from the registry. Idempotent. Does NOT
 // tear down the room's subscribers — that's the caller's responsibility
-// (Phase 8's GC path, T080).
+// (Phase 8 GC path, T080).
 func (m *GameManager) Remove(id GameID) {
 	m.mu.Lock()
 	delete(m.rooms, id)

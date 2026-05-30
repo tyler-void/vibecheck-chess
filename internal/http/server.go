@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	stdhttp "net/http"
 	"sync/atomic"
+	"time"
 
 	"kisschess/internal/chess"
+	"kisschess/internal/sse"
 )
 
 // Server is the kisschess HTTP entry point. Fields are exported only where
@@ -63,21 +65,28 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /readyz", s.handleReadyz)
 	s.Mux.HandleFunc("GET /metrics", s.handleMetrics) // populated by T085 in Phase 9
 
+	// Game CRUD + state.
+	s.Mux.HandleFunc("POST /games", s.handleCreateGame)
+	s.Mux.HandleFunc("GET /games/{id}/snapshot", s.handleSnapshot)
+	s.Mux.HandleFunc("POST /games/{id}/move", s.handleMove)
+
+	// SSE subscribe + initial hydration.
+	s.Mux.HandleFunc("GET /games/{id}/sse", s.handleSSE)
+
+	// Voluntary game-termination paths (FR-036 / FR-037).
+	s.Mux.HandleFunc("POST /games/{id}/resign", s.handleResign)
+	s.Mux.HandleFunc("POST /games/{id}/draw-offer/accept", s.handleDrawAccept) // more specific first
+	s.Mux.HandleFunc("POST /games/{id}/draw-offer", s.handleDrawOffer)
+
 	if s.staticRoot != "" {
 		fs := stdhttp.FileServer(stdhttp.Dir(s.staticRoot))
 		s.Mux.Handle("GET /static/", stdhttp.StripPrefix("/static/", fs))
-	}
 
-	// Phase 3 will register here:
-	//   POST   /games
-	//   GET    /games/{id}/snapshot
-	//   POST   /games/{id}/move
-	//   POST   /games/{id}/resign       (T104 / FR-036)
-	//   POST   /games/{id}/draw-offer   (T104 / FR-037)
-	//   POST   /games/{id}/draw-offer/accept (T104 / FR-037)
-	//   GET    /games/{id}/sse
-	//   GET    /                         (lobby)
-	//   GET    /game/{id}                (single-game view)
+		// Server-rendered Datastar pages. lobby.html + game.html live
+		// under staticRoot; templates load lazily on first request.
+		s.Mux.HandleFunc("GET /{$}", s.handleLobby)
+		s.Mux.HandleFunc("GET /game/{id}", s.handleGamePage)
+	}
 }
 
 // ServeHTTP makes Server an http.Handler so cmd/server can drop it straight
@@ -112,4 +121,27 @@ func (s *Server) handleReadyz(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 func (s *Server) handleMetrics(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(stdhttp.StatusOK)
+}
+
+// handleSSE dispatches GET /games/{id}/sse to the per-room subscribe
+// handler. Looks up the room then delegates to sse.SubscribeHandler, which
+// owns the SSE lifecycle (headers, replay, hub register/range/close, ping
+// ticker, Last-Event-ID handling).
+func (s *Server) handleSSE(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	id := chess.GameID(r.PathValue("id"))
+	room, ok := s.Manager.Get(id)
+	if !ok {
+		stdhttp.NotFound(w, r)
+		return
+	}
+	sse.SubscribeHandler(roomAdapter{room}, time.Now).ServeHTTP(w, r)
+}
+
+// roomAdapter bridges *chess.GameRoom to the sse.Room interface so internal/sse
+// doesn't have to import internal/chess (and break the package layering).
+type roomAdapter struct{ inner *chess.GameRoom }
+
+func (a roomAdapter) Hub() *sse.FanoutHub { return a.inner.Hub() }
+func (a roomAdapter) ReplayOrSnapshot(lastSeq uint64, now time.Time) ([][]byte, []byte) {
+	return a.inner.ReplayOrSnapshot(lastSeq, now)
 }

@@ -5,8 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"kisschess/internal/chess"
 )
 
 // FR-022 broadcast only to game's subscribers · FR-027 no slow blocking ·
@@ -161,7 +159,7 @@ func TestHub_ConcurrentRegisterUnregisterPublish(t *testing.T) {
 			return out
 		}()
 		for _, id := range ids {
-			h.Unregister(chess.ClientID(id))
+			h.Unregister(ClientID(id))
 		}
 	}
 	wg.Wait()
