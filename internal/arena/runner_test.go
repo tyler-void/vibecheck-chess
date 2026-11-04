@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -121,13 +122,13 @@ func TestRunMatchInterrupted(t *testing.T) {
 		c.Pairings = []Pairing{{A: "llm", B: "rand", Games: 2}}
 	})
 	m := newFake([]step{{slow: true}}, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	go func() { time.Sleep(100 * time.Millisecond); cancel(errors.New("interrupt signal received")) }()
 	sum, err := RunMatch(ctx, cfg, m, RunOptions{RunID: "r", Log: quietLog()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sum.Interrupted || sum.GamesStarted != 1 || sum.GamesAborted != 1 {
+	if !sum.Interrupted || sum.FatalError != "" || sum.GamesStarted != 1 || sum.GamesAborted != 1 {
 		t.Fatalf("%+v", sum)
 	}
 	b, _ := os.ReadFile(filepath.Join(cfg.OutDir, "r", "games.jsonl"))

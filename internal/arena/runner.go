@@ -87,6 +87,7 @@ func resolvePlayers(cfg *MatchConfig) (map[string]*player, error) {
 
 // RunMatch plays the whole match and writes arena-data/<run-id>/.
 func RunMatch(ctx context.Context, cfg *MatchConfig, model ModelClient, opt RunOptions) (Summary, error) {
+	parent := ctx
 	if opt.BackoffBase == 0 {
 		opt.BackoffBase = time.Second
 	}
@@ -160,10 +161,11 @@ func RunMatch(ctx context.Context, cfg *MatchConfig, model ModelClient, opt RunO
 			sum.GamesFinished++
 		}
 	}
-	if cause := context.Cause(ctx); cause != nil && cause != context.Canceled {
-		sum.FatalError = cause.Error()
-	} else if ctx.Err() != nil {
+	switch {
+	case parent.Err() != nil: // Ctrl-C / SIGTERM, whatever cause the signal context carries
 		sum.Interrupted = true
+	case ctx.Err() != nil:
+		sum.FatalError = context.Cause(ctx).Error()
 	}
 	sum.SpentUSD = env.Budget.Spent()
 	sum.Players = Summarize(rec.Decisions(), rec.Games())
