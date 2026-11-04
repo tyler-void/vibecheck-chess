@@ -1,0 +1,42 @@
+# Position
+
+You play White. It is your move.
+Plies played: 4 of 400.
+FEN: r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3
+
+```
+  a b c d e f g h
+8 r . b q k b n r 8
+7 p p p p . p p p 7
+6 . . n . . . . . 6
+5 . . . . p . . . 5
+4 . . . . P . . . 4
+3 . . . . . N . . 3
+2 P P P P . P P P 2
+1 R N B Q K B . R 1
+  a b c d e f g h
+```
+
+# Move history (SAN)
+
+1. e4 e5 2. Nf3 Nc6
+
+# Legal moves (UCI)
+
+f1b5 f1c4 d2d4 b1c3 e1e2
+
+# Other actions
+
+resign
+
+- Your next draw offer is allowed after 7 more of your own moves.
+
+# Opponent talk
+
+<opponent_talk untrusted="true">Your knight looks lonely.</opponent_talk>
+
+# Your memo from your previous decision
+
+Plan: Ruy Lopez, castle early.
+
+Call `act` exactly once.

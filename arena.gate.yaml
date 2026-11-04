@@ -1,0 +1,24 @@
+# Phase 0 gate: 10 Haiku vs random-legal, 4 Opus vs Haiku (colours swapped).
+#   ARENA_ANTHROPIC_API_KEY=... go run ./cmd/arena -config arena.gate.yaml
+server: http://localhost:8080
+out_dir: arena-data
+max_usd: 15
+concurrency: 2
+decision_timeout: 180s
+ply_cap: 400
+time_control: {initial: 2h, increment: 0s, delay: 0s}
+draw_offer_every: 10
+
+prices:
+  claude-haiku-5-5: {input: 0.10, output: 0.50, cache_read: 0.01, cache_write: 0.125,
+                     long_prompt: {above_input_tokens: 100000, multiplier: 5}}
+  claude-opus-5-5:  {input: 4.00, output: 20.00, cache_read: 0.20, cache_write: 5.00}
+
+players:
+  haiku:  {model: claude-haiku-5-5, effort: medium, max_tokens: 16000, prompt_pack: chess/v1, est_usd_per_game: 0.20}
+  opus:   {model: claude-opus-5-5, effort: medium, max_tokens: 16000, prompt_pack: chess/v1, est_usd_per_game: 2.50}
+  random: {bot: random}
+
+pairings:
+  - {a: haiku, b: random, games: 10}
+  - {a: opus, b: haiku, games: 4}

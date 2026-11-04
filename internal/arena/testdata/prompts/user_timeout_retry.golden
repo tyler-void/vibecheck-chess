@@ -1,0 +1,46 @@
+# Position
+
+You play White. It is your move.
+Plies played: 0 of 400.
+FEN: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+
+```
+  a b c d e f g h
+8 r n b q k b n r 8
+7 p p p p p p p p 7
+6 . . . . . . . . 6
+5 . . . . . . . . 5
+4 . . . . . . . . 4
+3 . . . . . . . . 3
+2 P P P P P P P P 2
+1 R N B Q K B N R 1
+  a b c d e f g h
+```
+
+# Move history (SAN)
+
+(no moves yet)
+
+# Legal moves (UCI)
+
+a2a3 a2a4 b1a3 b1c3 b2b3 b2b4 c2c3 c2c4 d2d3 d2d4 e2e3 e2e4 f2f3 f2f4 g1f3 g1h3 g2g3 g2g4 h2h3 h2h4
+
+# Other actions
+
+resign offer_draw
+
+# Opponent talk
+
+(none)
+
+# Your memo from your previous decision
+
+(none)
+
+# Previous attempts at this decision
+
+- no answer within 180 seconds (timeout). A second timeout in a row forfeits; answer promptly.
+
+You have 3 failed attempt(s) left before you forfeit.
+
+Call `act` exactly once.

@@ -1,0 +1,44 @@
+Your opponent offers a draw. Your legal actions are `accept_draw` or a move. A move declines the offer.
+
+# Position
+
+You play Black. It is your move.
+Plies played: 1 of 400.
+FEN: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1
+
+```
+  a b c d e f g h
+8 r n b q k b n r 8
+7 p p p p p p p p 7
+6 . . . . . . . . 6
+5 . . . . . . . . 5
+4 . . . . P . . . 4
+3 . . . . . . . . 3
+2 P P P P . P P P 2
+1 R N B Q K B N R 1
+  a b c d e f g h
+```
+
+# Move history (SAN)
+
+1. e4
+
+# Legal moves (UCI)
+
+e7e5 c7c5
+
+# Other actions
+
+accept_draw
+
+- A draw is claimable in the current position (threefold repetition or 50-move rule).
+
+# Opponent talk
+
+<opponent_talk untrusted="true">Let's call it a day?</opponent_talk>
+
+# Your memo from your previous decision
+
+(none)
+
+Call `act` exactly once.

@@ -1,0 +1,47 @@
+# Position
+
+You play Black. It is your move.
+Plies played: 1 of 400.
+FEN: rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1
+
+```
+  a b c d e f g h
+8 r n b q k b n r 8
+7 p p p p p p p p 7
+6 . . . . . . . . 6
+5 . . . . . . . . 5
+4 . . . . P . . . 4
+3 . . . . . . . . 3
+2 P P P P . P P P 2
+1 R N B Q K B N R 1
+  a b c d e f g h
+```
+
+# Move history (SAN)
+
+1. e4
+
+# Legal moves (UCI)
+
+e7e5 c7c5 g8f6
+
+# Other actions
+
+resign offer_draw
+
+# Opponent talk
+
+(none)
+
+# Your memo from your previous decision
+
+(none)
+
+# Previous attempts at this decision
+
+- `e7e4` was rejected (illegal_move): not a legal move in this position
+- no act call (no_act): your reply did not call the act tool
+
+You have 1 failed attempt(s) left before you forfeit.
+
+Call `act` exactly once.

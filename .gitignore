@@ -39,3 +39,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Arena run output (results, per-decision logs)
+arena-data/

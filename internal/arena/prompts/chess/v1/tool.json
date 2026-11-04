@@ -1,0 +1,23 @@
+{
+  "name": "act",
+  "description": "Submit your one action for this decision. Call exactly once per reply.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["action"],
+    "properties": {
+      "action": {
+        "type": "string",
+        "description": "A UCI move (e2e4, e7e8q), optionally followed by ' claim'; or claim_draw, resign, offer_draw, accept_draw."
+      },
+      "talk": {
+        "type": "string",
+        "description": "Optional public table talk, at most 140 characters. Shown to your opponent after your action."
+      },
+      "memo": {
+        "type": "string",
+        "description": "Optional private note to yourself, at most 280 characters. Shown only to you at your next decision."
+      }
+    }
+  }
+}
