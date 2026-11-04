@@ -105,6 +105,12 @@ func NewGame(env *Env, id string, pairing, index int, seed uint64, w, b *player)
 		replica: NewReplica(), acting: none, liveOffer: none, loser: none, modelCalls: map[string]int{}}
 }
 
+// ceiling is the per-game hard spend limit: max_game_usd_factor × the sum of
+// both players' est_usd_per_game. 0 means no ceiling (bots only).
+func (g *Game) ceiling() float64 {
+	return g.env.Cfg.MaxGameUSDFactor * (g.players[white].cfg.EstUSDPerGame + g.players[black].cfg.EstUSDPerGame)
+}
+
 func (g *Game) seatID(c int) string {
 	return fmt.Sprintf("%s-%s-%s", g.id, colorLetter[c], g.players[c].name)
 }
@@ -212,10 +218,12 @@ func (g *Game) Play(ctx context.Context) GameRecord {
 
 // More arena-level end reasons.
 const (
-	ReasonDrawPlyCap       = "draw_ply_cap"
-	ReasonAbortInterrupted = "aborted_interrupted"
-	ReasonAbortFatal       = "aborted_fatal_api_error"
-	ReasonAbortReplica     = "aborted_replica_mismatch"
+	ReasonDrawPlyCap         = "draw_ply_cap"
+	ReasonAbortInterrupted   = "aborted_interrupted"
+	ReasonAbortFatal         = "aborted_fatal_api_error"
+	ReasonAbortReplica       = "aborted_replica_mismatch"
+	ReasonAbortModelMismatch = "aborted_model_mismatch"
+	ReasonAbortGameBudget    = "aborted_game_budget"
 )
 
 // seat is one side's decision loop. Its fields are touched only by its own
@@ -450,8 +458,8 @@ func (s *seat) arenaRule(a Action, mode ViewMode) string {
 			return "moves_only_after_offer"
 		}
 	case ModeOfferPending:
-		if a.Kind != KindMove && a.Kind != KindAcceptDraw {
-			return "accept_draw_or_move_only"
+		if a.Kind == KindOfferDraw {
+			return "offer_while_opponent_offer_pending"
 		}
 	default:
 		if a.Kind == KindOfferDraw {
@@ -508,8 +516,13 @@ func (s *seat) decide(ctx context.Context, snap Snapshot, mode ViewMode) decisio
 			a, failEv, err := s.ask(ctx, snap, mode, notes, maxFailures-st.IllegalAttempts, &rec)
 			rec.Attempts++
 			if err != nil {
-				if errors.Is(err, errFatal) {
+				switch {
+				case errors.Is(err, errFatal):
 					return finish(decision{kind: resAbort, reason: ReasonAbortFatal}, "aborted")
+				case errors.Is(err, errModelMismatch):
+					return finish(decision{kind: resAbort, reason: ReasonAbortModelMismatch}, "aborted")
+				case errors.Is(err, errGameBudget):
+					return finish(decision{kind: resAbort, reason: ReasonAbortGameBudget}, "aborted")
 				}
 				return finish(decision{kind: resCancelled}, "cancelled")
 			}
@@ -575,7 +588,11 @@ func (s *seat) decide(ctx context.Context, snap Snapshot, mode ViewMode) decisio
 	}
 }
 
-var errFatal = errors.New("fatal model error")
+var (
+	errFatal         = errors.New("fatal model error")
+	errModelMismatch = errors.New("response model mismatch")
+	errGameBudget    = errors.New("game budget exceeded")
+)
 
 // ask gets one action from the seat's player. failEv is non-nil when the
 // attempt failed before reaching the server. err is non-nil only for
@@ -637,6 +654,7 @@ func (s *seat) ask(ctx context.Context, snap Snapshot, mode ViewMode, notes []st
 	env.Budget.Charge(g.id, usd)
 	g.mu.Lock()
 	g.usd += usd
+	gameUSD := g.usd
 	prior := g.modelCalls[req.Model]
 	g.modelCalls[req.Model]++
 	g.mu.Unlock()
@@ -647,9 +665,21 @@ func (s *seat) ask(ctx context.Context, snap Snapshot, mode ViewMode, notes []st
 		rec.CacheMissAfterFirst = true
 		env.Log.Warn("cache_read_input_tokens is 0 after the game's first call", "game", g.id, "model", req.Model, "ply", rec.Ply)
 	}
+	if ceiling := g.ceiling(); ceiling > 0 && gameUSD > ceiling {
+		al.Kind, al.Code = "aborted", "game_budget"
+		rec.AttemptLog = append(rec.AttemptLog, al)
+		env.Log.Warn("game spend over its ceiling; aborting the game", "game", g.id,
+			"usd", fmt.Sprintf("%.4f", gameUSD), "ceiling", fmt.Sprintf("%.4f", ceiling))
+		return Action{}, nil, errGameBudget
+	}
 	if reply.Model != req.Model {
-		env.Log.Error("response model differs from requested model", "game", g.id, "requested", req.Model, "got", reply.Model)
-		return fail(ProviderErr("model_mismatch"))
+		al.Kind, al.Code = "fatal", "model_mismatch"
+		rec.AttemptLog = append(rec.AttemptLog, al)
+		env.Log.Error("response model differs from requested model; stopping the run", "game", g.id, "requested", req.Model, "got", reply.Model)
+		if env.OnFatal != nil {
+			env.OnFatal(fmt.Errorf("response model %q differs from requested model %q", reply.Model, req.Model))
+		}
+		return Action{}, nil, errModelMismatch
 	}
 	if reply.Act == nil {
 		switch reply.StopReason {
@@ -776,13 +806,13 @@ func describeFailure(ev Event, a Action, timeout time.Duration) string {
 		return fmt.Sprintf("`%s` was malformed (%s)", act, ev.Code)
 	case EvIllegal:
 		reason := map[string]string{
-			"illegal_move":             "not a legal move in this position",
-			"no_pending_offer":         "there is no draw offer from your opponent to accept",
-			"own_offer":                "you cannot accept your own draw offer",
-			"no_claimable_draw":        "there is no threefold repetition or 50-move basis for a claim now",
-			"draw_offer_limit":         "you offered a draw too recently",
-			"moves_only_after_offer":   "after offer_draw you must play a move",
-			"accept_draw_or_move_only": "your opponent offered a draw: answer with accept_draw or a move",
+			"illegal_move":                       "not a legal move in this position",
+			"no_pending_offer":                   "there is no draw offer from your opponent to accept",
+			"own_offer":                          "you cannot accept your own draw offer",
+			"no_claimable_draw":                  "there is no threefold repetition or 50-move basis for a claim now",
+			"draw_offer_limit":                   "you offered a draw too recently",
+			"moves_only_after_offer":             "after offer_draw you must play a move",
+			"offer_while_opponent_offer_pending": "your opponent has offered a draw: accept it, play a move (which declines), claim a draw or resign",
 		}[ev.Code]
 		if reason == "" {
 			reason = "rejected by the server"

@@ -45,19 +45,22 @@ type Pairing struct {
 
 // MatchConfig is the whole match file.
 type MatchConfig struct {
-	Server          string                  `yaml:"server"`
-	OutDir          string                  `yaml:"out_dir"`
-	MaxUSD          float64                 `yaml:"max_usd"`
-	Concurrency     int                     `yaml:"concurrency"`
-	DecisionTimeout time.Duration           `yaml:"decision_timeout"`
-	PlyCap          int                     `yaml:"ply_cap"`
-	TimeControl     TimeControl             `yaml:"time_control"`
-	DrawOfferEvery  int                     `yaml:"draw_offer_every"`
-	PollInterval    time.Duration           `yaml:"poll_interval"`
-	RunSeed         uint64                  `yaml:"run_seed"` // 0 = random, recorded
-	Prices          Prices                  `yaml:"prices"`
-	Players         map[string]PlayerConfig `yaml:"players"`
-	Pairings        []Pairing               `yaml:"pairings"`
+	Server          string        `yaml:"server"`
+	OutDir          string        `yaml:"out_dir"`
+	MaxUSD          float64       `yaml:"max_usd"`
+	Concurrency     int           `yaml:"concurrency"`
+	DecisionTimeout time.Duration `yaml:"decision_timeout"`
+	PlyCap          int           `yaml:"ply_cap"`
+	TimeControl     TimeControl   `yaml:"time_control"`
+	DrawOfferEvery  int           `yaml:"draw_offer_every"`
+	PollInterval    time.Duration `yaml:"poll_interval"`
+	// A game whose spend exceeds MaxGameUSDFactor × the sum of its players'
+	// est_usd_per_game is aborted with no result.
+	MaxGameUSDFactor float64                 `yaml:"max_game_usd_factor"`
+	RunSeed          uint64                  `yaml:"run_seed"` // 0 = random, recorded
+	Prices           Prices                  `yaml:"prices"`
+	Players          map[string]PlayerConfig `yaml:"players"`
+	Pairings         []Pairing               `yaml:"pairings"`
 }
 
 // LoadConfig reads and decodes a match file, rejecting unknown fields, and
@@ -96,6 +99,9 @@ func (c *MatchConfig) applyDefaults() {
 	if c.DrawOfferEvery == 0 {
 		c.DrawOfferEvery = 10
 	}
+	if c.MaxGameUSDFactor == 0 {
+		c.MaxGameUSDFactor = 3
+	}
 	if c.PollInterval == 0 {
 		c.PollInterval = 250 * time.Millisecond
 	}
@@ -127,6 +133,9 @@ func (c *MatchConfig) Validate(hasKey bool) error {
 	}
 	if c.Concurrency < 1 || c.PlyCap < 1 || c.DrawOfferEvery < 1 || c.DecisionTimeout <= 0 {
 		bad("concurrency, ply_cap, draw_offer_every and decision_timeout must be positive")
+	}
+	if c.MaxGameUSDFactor < 1 {
+		bad("max_game_usd_factor must be >= 1")
 	}
 	if c.TimeControl.Increment < 0 || c.TimeControl.Delay < 0 {
 		bad("time_control increment and delay must be >= 0")

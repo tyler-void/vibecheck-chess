@@ -81,7 +81,7 @@ type ViewMode string
 
 const (
 	ModeNormal       ViewMode = "normal"
-	ModeOfferPending ViewMode = "offer_pending" // opponent offered: accept_draw or a move
+	ModeOfferPending ViewMode = "offer_pending" // opponent offered: no offer_draw now
 	ModeFollowUp     ViewMode = "follow_up"     // after this seat's offer_draw: moves only
 )
 
@@ -105,13 +105,15 @@ type SeatView struct {
 // OtherActions lists the non-move actions the seat may take now.
 func (v SeatView) OtherActions() []string {
 	switch v.Mode {
-	case ModeOfferPending:
-		return []string{"accept_draw"}
 	case ModeFollowUp:
 		return nil
 	}
-	out := []string{"resign"}
-	if v.OfferAllowed {
+	var out []string
+	if v.Mode == ModeOfferPending {
+		out = append(out, "accept_draw")
+	}
+	out = append(out, "resign")
+	if v.Mode == ModeNormal && v.OfferAllowed {
 		out = append(out, "offer_draw")
 	}
 	if v.CanClaimDraw {

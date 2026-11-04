@@ -1,4 +1,4 @@
-Your opponent offers a draw. Your legal actions are `accept_draw` or a move. A move declines the offer.
+Your opponent offers a draw. You may `accept_draw`, play a move (a move declines the offer), claim a draw if one is claimable, or `resign`. You cannot offer a draw yourself in this decision.
 
 # Position
 
@@ -29,7 +29,7 @@ e7e5 c7c5
 
 # Other actions
 
-accept_draw
+accept_draw resign claim_draw
 
 - A draw is claimable in the current position (threefold repetition or 50-move rule).
 

@@ -47,6 +47,9 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if c.TimeControl.Initial != 2*time.Hour || c.TimeControl.Increment != 0 || c.TimeControl.Delay != 0 {
 		t.Fatalf("time control: %+v", c.TimeControl)
 	}
+	if c.MaxGameUSDFactor != 3 {
+		t.Fatalf("max_game_usd_factor default %v", c.MaxGameUSDFactor)
+	}
 	if c.OutDir != "arena-data" || c.Concurrency != 2 || c.PollInterval != 250*time.Millisecond {
 		t.Fatalf("defaults: %+v", c)
 	}
@@ -99,6 +102,7 @@ func TestConfigErrors(t *testing.T) {
 		{"unknown bot", strings.Replace(validYAML, "{bot: random}", "{bot: stockfish}", 1), "bot", true},
 		{"missing key", validYAML, "ARENA_ANTHROPIC_API_KEY", false},
 		{"no pairings", strings.Split(validYAML, "pairings:")[0], "pairings", true},
+		{"game factor below 1", validYAML + "\nmax_game_usd_factor: 0.5\n", "max_game_usd_factor", true},
 		{"negative price", strings.Replace(validYAML, "input: 4.00", "input: -1", 1), "negative", true},
 	}
 	for _, c := range cases {

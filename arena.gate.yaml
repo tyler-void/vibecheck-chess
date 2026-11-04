@@ -3,6 +3,7 @@
 server: http://localhost:8080
 out_dir: arena-data
 max_usd: 15
+max_game_usd_factor: 3      # abort a game whose spend exceeds 3x its players' est_usd_per_game
 concurrency: 2
 decision_timeout: 180s
 ply_cap: 400

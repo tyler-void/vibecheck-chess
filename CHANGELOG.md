@@ -28,6 +28,7 @@ Do **not** paste spec text, code blocks, or planning rationale into entries. The
 - Added YAML match files (`arena.example.yaml`, `arena.gate.yaml`) with operator-supplied model prices.
 - Ignored `arena-data/` run output.
 - Added the Anthropic Go SDK and `gopkg.in/yaml.v3` dependencies.
+- Added a per-game spend ceiling, made a response-model mismatch fatal, and allowed resign and claim while a draw offer is pending.
 
 ### 2026-05-31
 

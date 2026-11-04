@@ -20,7 +20,7 @@ Call the `act` tool with one action in this grammar:
 - `claim_draw`: claim a draw without moving.
 - `resign`: resign the game.
 - `offer_draw`: offer a draw. This does not end your turn. You will be asked again for your move right away, and the offer reaches your opponent together with that move. After an offer you must wait at least {{.DrawOfferEvery}} of your own moves before offering again; an earlier offer is rejected as a failed attempt.
-- `accept_draw`: accept a draw your opponent has offered. When your opponent has offered a draw, your only legal actions are `accept_draw` or a move. Playing a move declines the offer.
+- `accept_draw`: accept a draw your opponent has offered. When your opponent has offered a draw, you may accept it, play a move (which declines it), claim a draw, or resign; you cannot offer a draw yourself in that decision.
 
 The message lists the legal moves and the other actions available right now. Pick from them exactly as written. The server alone decides legality.
 

@@ -320,16 +320,67 @@ func TestGameProviderErrorsRecover(t *testing.T) {
 	}
 }
 
-func TestGameModelMismatchIsProviderError(t *testing.T) {
+func TestGameModelMismatchIsFatal(t *testing.T) {
 	m := newFake([]step{{action: "e2e4", model: "claude-other"}, mv("d2d4")}, nil)
-	r := newRig(t, m, func(c *MatchConfig) { c.PlyCap = 2 })
+	r := newRig(t, m, nil)
 	g := r.play("llm", "rand")
+	if g.Result != "aborted" || g.Reason != ReasonAbortModelMismatch || len(r.fatals) != 1 {
+		t.Fatalf("%q %q fatals %d", g.Result, g.Reason, len(r.fatals))
+	}
 	d := decisionsOf(r, "w")[0]
-	if d.ProviderRetries != 1 || d.Action != "d2d4" || g.Actions[0].Action != "d2d4" {
+	if d.Attempts != 1 || d.ProviderRetries != 0 || len(g.Actions) != 0 {
+		t.Fatalf("mismatch must not be retried: %+v", d)
+	}
+	if d.AttemptLog[0].Code != "model_mismatch" || d.AttemptLog[0].ResponseModel != "claude-other" || d.USD == 0 {
+		t.Fatalf("%+v", d.AttemptLog[0])
+	}
+}
+
+func TestGamePendingOfferAllowsResign(t *testing.T) {
+	m := newFake([]step{mv("offer_draw"), mv("e2e4")}, []step{mv("resign")})
+	r := newRig(t, m, nil)
+	g := r.play("llm", "llm2")
+	if g.Result != "1-0" || g.Reason != "resign" {
+		t.Fatalf("%q %q", g.Result, g.Reason)
+	}
+	b := m.users("Black")[0]
+	if !strings.Contains(b, "accept_draw resign") || strings.Contains(b, "resign offer_draw") {
+		t.Fatalf("pending-offer actions:\n%s", b)
+	}
+	if d := decisionsOf(r, "b")[0]; d.Mode != "offer_pending" || d.IllegalAttempts != 0 {
 		t.Fatalf("%+v", d)
 	}
-	if d.AttemptLog[0].Code != "model_mismatch" || d.AttemptLog[0].ResponseModel != "claude-other" {
-		t.Fatalf("%+v", d.AttemptLog[0])
+}
+
+func TestGamePendingOfferAllowsClaimDraw(t *testing.T) {
+	m := newFake([]step{mv("offer_draw"), mv("e2e4")}, []step{mv("claim_draw"), mv("e7e5")})
+	r := newRig(t, m, func(c *MatchConfig) { c.PlyCap = 2 })
+	r.play("llm", "llm2")
+	d := decisionsOf(r, "b")[0]
+	// The arena lets the claim through; the server rejects it for lack of basis.
+	if d.IllegalAttempts != 1 || d.AttemptLog[1].Code != "no_claimable_draw" || d.Action != "e7e5" {
+		t.Fatalf("%+v", d)
+	}
+}
+
+func TestGameBudgetCeilingAborts(t *testing.T) {
+	// est 0.01 (llm) + 0 (bot), factor 3: ceiling 0.03. Each call costs 0.02.
+	big := Usage{In: 20000}
+	m := newFake([]step{{action: "e2e4", usage: &big}, {action: "d2d4", usage: &big}}, nil)
+	r := newRig(t, m, nil)
+	g := r.play("llm", "rand")
+	if g.Result != "aborted" || g.Reason != ReasonAbortGameBudget {
+		t.Fatalf("%q %q", g.Result, g.Reason)
+	}
+	if g.USD < 0.039 || g.USD > 0.041 || len(r.fatals) != 0 {
+		t.Fatalf("usd %v fatals %d", g.USD, len(r.fatals))
+	}
+}
+
+func TestGameNoCeilingForBotsOnly(t *testing.T) {
+	r := newRig(t, nil, func(c *MatchConfig) { c.PlyCap = 6 })
+	if g := r.play("rand", "rand2"); g.Reason != ReasonDrawPlyCap {
+		t.Fatal(g.Reason)
 	}
 }
 
@@ -381,7 +432,7 @@ func TestGameOfferThenAccept(t *testing.T) {
 func TestGameOfferDeclinedByMove(t *testing.T) {
 	m := newFake(
 		[]step{mv("offer_draw"), mv("e2e4"), mv("d2d4")},
-		[]step{mv("resign"), mv("e7e5"), mv("d7d5")})
+		[]step{mv("offer_draw"), mv("e7e5"), mv("d7d5")})
 	r := newRig(t, m, func(c *MatchConfig) { c.PlyCap = 4 })
 	g := r.play("llm", "llm2")
 	if g.Reason != ReasonDrawPlyCap {
@@ -394,7 +445,7 @@ func TestGameOfferDeclinedByMove(t *testing.T) {
 	if bd[1].Mode != "normal" {
 		t.Fatalf("a move must decline the offer; second black decision mode %q", bd[1].Mode)
 	}
-	if !strings.Contains(m.users("Black")[1], "accept_draw_or_move_only") {
+	if !strings.Contains(m.users("Black")[1], "offer_while_opponent_offer_pending") {
 		t.Fatal("pending-offer rule error not shown")
 	}
 }

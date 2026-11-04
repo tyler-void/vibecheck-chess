@@ -4,6 +4,7 @@
 server: http://localhost:8080
 out_dir: arena-data
 max_usd: 5                    # stop starting games once spend + in-flight estimates reach this
+max_game_usd_factor: 3        # abort a game whose spend exceeds 3x its players' est_usd_per_game
 concurrency: 2
 decision_timeout: 180s        # per model request, enforced by the harness
 ply_cap: 400                  # draw by cap
