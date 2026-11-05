@@ -158,10 +158,12 @@ func TestE2E_MalformedLastEventIDFallsBackTo200(t *testing.T) {
 	}
 }
 
-// FR-024/FR-025: connecting fresh (no header) on a game whose ring is
-// empty (seq == 0) should NOT emit a hydration or replay event — there's
-// nothing to send. The client waits for live events.
-func TestE2E_FreshConnectAtSeqZeroNoReplay(t *testing.T) {
+// A fresh connect (no Last-Event-ID header) MUST receive exactly one
+// hydration signals patch on connect, regardless of r.seq. This guarantees
+// the client has every field of the current snapshot even when the wire
+// schema grows (e.g. legal_moves was added in a later release and existed
+// in neither initial-state JSON nor an empty replay ring at seq=0).
+func TestE2E_FreshConnectHydrates(t *testing.T) {
 	srv := startServer(t)
 	gameID := createGame(t, srv, "alice", "bob", 60000, 0)
 
@@ -171,8 +173,6 @@ func TestE2E_FreshConnectAtSeqZeroNoReplay(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Read for ~200ms. Should see ONLY the 15s ping or nothing — no
-	// replay events because seq is still 0.
 	var got atomic.Int64
 	done := make(chan struct{})
 	go func() {
@@ -189,8 +189,8 @@ func TestE2E_FreshConnectAtSeqZeroNoReplay(t *testing.T) {
 	resp.Body.Close()
 	<-done
 
-	if got.Load() != 0 {
-		t.Errorf("fresh connect at seq=0 received %d events, want 0", got.Load())
+	if got.Load() != 1 {
+		t.Errorf("fresh connect at seq=0 received %d events, want 1 (hydration)", got.Load())
 	}
 }
 

@@ -69,6 +69,8 @@ func (s *Server) writeActionError(w stdhttp.ResponseWriter, err error, room *che
 		status, code = stdhttp.StatusConflict, "no_pending_offer"
 	case chess.ErrOwnOffer:
 		status, code = stdhttp.StatusConflict, "own_offer"
+	case chess.ErrNoClaimableDraw:
+		status, code = stdhttp.StatusConflict, "no_claimable_draw"
 	default:
 		status, code = stdhttp.StatusInternalServerError, "internal_error"
 	}
@@ -137,6 +139,26 @@ func (s *Server) handleDrawAccept(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	}
 	now := time.Now()
 	result, err := room.ApplyDrawAccept(r.Context(), chess.ActionReq{
+		PlayerID:       player,
+		ClientActionID: body.ClientActionID,
+		Seq:            body.Seq,
+	}, now)
+	if err != nil {
+		s.writeActionError(w, err, room, now)
+		return
+	}
+	writeActionSuccess(w, r, result)
+}
+
+// POST /games/{id}/claim-draw — claim threefold repetition or fifty-move
+// rule. Either participant may claim; the server validates the FIDE basis.
+func (s *Server) handleDrawClaim(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	room, player, body, ok := s.decodeAction(w, r)
+	if !ok {
+		return
+	}
+	now := time.Now()
+	result, err := room.ApplyClaimDraw(r.Context(), chess.ActionReq{
 		PlayerID:       player,
 		ClientActionID: body.ClientActionID,
 		Seq:            body.Seq,

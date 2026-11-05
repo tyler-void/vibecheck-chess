@@ -1,4 +1,4 @@
-.PHONY: build run test test-race lint tailwind tailwind-watch perf-smoke perf-soak clean help
+.PHONY: build run arena test test-race lint tailwind tailwind-watch perf-smoke perf-soak clean help
 
 BIN          := bin/kisschess
 TAILWIND     := bin/tailwindcss
@@ -12,6 +12,7 @@ help:
 	@echo 'Targets:'
 	@echo '  build           — go build -o $(BIN) ./cmd/server'
 	@echo '  run             — go run ./cmd/server (dev)'
+	@echo '  arena           — go run ./cmd/arena -config $$(ARENA_CONFIG) (needs ARENA_ANTHROPIC_API_KEY for model players)'
 	@echo '  test            — go test ./...'
 	@echo '  test-race       — go test -race ./... (mandatory before commit)'
 	@echo '  lint            — gofmt -d + go vet + staticcheck'
@@ -32,6 +33,10 @@ build:
 
 run:
 	go run ./cmd/server
+
+ARENA_CONFIG ?= arena.gate.yaml
+arena:
+	go run ./cmd/arena -config $(ARENA_CONFIG)
 
 test:
 	go test ./...

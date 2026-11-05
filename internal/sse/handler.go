@@ -25,6 +25,14 @@ const WriteDeadline = 3 * time.Second
 type Room interface {
 	Hub() *FanoutHub
 	ReplayOrSnapshot(lastSeq uint64, now time.Time) (replay [][]byte, hydration []byte)
+	// HydrateBytes returns a fresh datastar-patch-signals payload that
+	// reflects the room's current state. Used for connections that arrive
+	// WITHOUT a Last-Event-ID header (a brand-new client), so they receive
+	// the authoritative snapshot regardless of seq value — the
+	// ReplayOrSnapshot fast path of "lastSeq == r.seq → nothing to send"
+	// silently starves new clients of fields they didn't have at page-render
+	// time (e.g. legal_moves added in a later release).
+	HydrateBytes(now time.Time) []byte
 }
 
 // SubscribeHandler serves GET /games/{id}/sse. Lifecycle:
@@ -64,11 +72,22 @@ func SubscribeHandler(room Room, now func() time.Time) stdhttp.HandlerFunc {
 			return
 		}
 
-		// 2. Last-Event-ID parsing. Malformed → fresh hydration.
-		lastSeq, _ := parseLastEventID(r.Header.Get("Last-Event-ID"))
+		// 2. Last-Event-ID parsing. Absent OR malformed → always hydrate.
+		lastSeq, ok := parseLastEventID(r.Header.Get("Last-Event-ID"))
 
 		// 3. Replay or hydrate.
-		replay, hydration := room.ReplayOrSnapshot(lastSeq, now())
+		//   - No header (ok=false): brand-new client, send the current
+		//     authoritative snapshot unconditionally.
+		//   - With header: consult the room — replay missed events, or
+		//     hydrate if the gap is too large for the ring, or send nothing
+		//     when the client is already at r.seq.
+		var replay [][]byte
+		var hydration []byte
+		if !ok {
+			hydration = room.HydrateBytes(now())
+		} else {
+			replay, hydration = room.ReplayOrSnapshot(lastSeq, now())
+		}
 		writeAndFlush := func(b []byte) error {
 			_ = rc.SetWriteDeadline(now().Add(WriteDeadline))
 			if _, err := w.Write(b); err != nil {

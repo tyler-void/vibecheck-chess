@@ -189,3 +189,74 @@ func (r *GameRoom) ApplyDrawAccept(ctx context.Context, req ActionReq, now time.
 	logTerminal(r.id, result.Snapshot.Outcome, result.Snapshot.Termination, result.Seq)
 	return result, nil
 }
+
+// ApplyClaimDraw ends the game as a draw when the claimant has a valid
+// FIDE basis: either the current position has occurred 3+ times (threefold
+// repetition) or the halfmove clock is at 100+ (fifty-move rule). Either
+// participant may claim — it is the rule itself, not an offer.
+//
+// Errors:
+//
+//   - ErrNotParticipant — req.PlayerID isn't White or Black.
+//   - ErrStaleSequence  — req.Seq != current seq.
+//   - ErrGameOver       — Outcome already set.
+//   - ErrNoClaimableDraw — no FIDE basis for the claim at this position.
+func (r *GameRoom) ApplyClaimDraw(ctx context.Context, req ActionReq, now time.Time) (ActionResult, error) {
+	start := time.Now()
+	r.mu.Lock()
+
+	if cached, ok := r.seenActions[req.ClientActionID]; ok {
+		r.mu.Unlock()
+		cached.Idempotent = true
+		return cached, nil
+	}
+
+	if _, ok := r.playerColor(req.PlayerID); !ok {
+		r.mu.Unlock()
+		return ActionResult{}, ErrNotParticipant
+	}
+
+	if r.outcome != Ongoing {
+		r.mu.Unlock()
+		return ActionResult{}, ErrGameOver
+	}
+
+	if req.Seq != r.seq {
+		r.mu.Unlock()
+		return ActionResult{}, ErrStaleSequence
+	}
+
+	pos := r.game.Position()
+	switch {
+	case r.repetition[positionKey(pos)] >= 3:
+		r.outcome = Draw
+		r.termination = ThreefoldRepetition
+	case pos.HalfMoveClock() >= 100:
+		r.outcome = Draw
+		r.termination = FiftyMoveRule
+	default:
+		r.mu.Unlock()
+		return ActionResult{}, ErrNoClaimableDraw
+	}
+
+	r.drawOfferActive = false
+	if r.flagTimer != nil {
+		r.flagTimer.Stop()
+		r.flagTimer = nil
+	}
+	r.seq++
+
+	snap := r.snapshotLocked(now)
+	bytes := dsenc.PatchSignalsBytes(snap.Seq, snap.toSignalsJSON())
+	r.recent.Append(snap.Seq, SSEEvent{Seq: snap.Seq, Bytes: bytes})
+
+	result := ActionResult{Seq: snap.Seq, Snapshot: snap}
+	r.rememberAction(req.ClientActionID, result)
+
+	r.mu.Unlock()
+	r.hub.Publish(bytes)
+	recordAction(ActionDrawClaim, start)
+	logActionAccepted(ActionDrawClaim, r.id, result.Seq)
+	logTerminal(r.id, result.Snapshot.Outcome, result.Snapshot.Termination, result.Seq)
+	return result, nil
+}

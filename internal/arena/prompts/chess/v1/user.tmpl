@@ -1,0 +1,51 @@
+{{- if eq .Mode "follow_up" -}}
+You have offered a draw. Now play your move; the offer reaches your opponent with it. Only moves are legal in this follow-up.
+
+{{end -}}
+{{- if eq .Mode "offer_pending" -}}
+Your opponent offers a draw. You may `accept_draw`, play a move (a move declines the offer), claim a draw if one is claimable, or `resign`. You cannot offer a draw yourself in this decision.
+
+{{end -}}
+# Position
+
+You play {{.Color}}. It is your move.
+Plies played: {{.Plies}} of {{.PlyCap}}.
+FEN: {{.FEN}}
+
+```
+{{.Board}}
+```
+
+# Move history (SAN)
+
+{{if .History}}{{.History}}{{else}}(no moves yet){{end}}
+
+# Legal moves (UCI)
+
+{{join .LegalMoves " "}}
+
+# Other actions
+
+{{if .OtherActions}}{{join .OtherActions " "}}{{else}}(none in this decision){{end}}
+{{- if .DrawNotes}}
+{{range .DrawNotes}}
+- {{.}}{{end}}
+{{- end}}
+
+# Opponent talk
+
+{{if .OpponentTalk}}<opponent_talk untrusted="true">{{.OpponentTalk}}</opponent_talk>{{else}}(none){{end}}
+
+# Your memo from your previous decision
+
+{{if .Memo}}{{.Memo}}{{else}}(none){{end}}
+{{- if .Attempts}}
+
+# Previous attempts at this decision
+{{range .Attempts}}
+- {{.}}{{end}}
+
+You have {{.AttemptsLeft}} failed attempt(s) left before you forfeit.
+{{- end}}
+
+Call `act` exactly once.

@@ -6,148 +6,702 @@
   <title>KISS-Chess — Game {{.GameID}}</title>
   <link rel="stylesheet" href="/static/output.css">
   <link rel="stylesheet" href="/static/vendor/cm-chessboard/assets/chessboard.css">
-  <script type="module" src="/static/vendor/datastar.js"></script>
-</head>
-<body>
-  <main
-    id="game-root"
-    class="game-shell"
-    data-signals='{"seq":{{.Snapshot.Seq}},"server_unix_ms":{{.Snapshot.ServerUnixMS}},"active_expires_at_unix_ms":{{.Snapshot.ActiveExpiresAtUnixMS}},"white_ms":{{.Snapshot.WhiteMS}},"black_ms":{{.Snapshot.BlackMS}},"turn":"{{.Snapshot.Turn}}","outcome":{{.Snapshot.Outcome}},"termination":{{.Snapshot.Termination}},"last_move":"{{.Snapshot.LastMove}}","fen":"{{.Snapshot.FEN}}","draw_offer_from":"{{.Snapshot.DrawOfferFrom}}","intended_move":""}'
-    data-on-load="@get('/games/{{.GameID}}/sse', {openWhenHidden: true})"
-  >
-    <header class="mb-4 flex items-center justify-between">
-      <div>
-        <h1 class="text-xl font-semibold tracking-tight">Game <code class="font-mono text-base">{{.GameID}}</code></h1>
-        <p class="text-panel-muted text-sm">You: <code>{{.As}}</code> · Turn: <span data-text="$turn === 'w' ? 'White' : 'Black'"></span></p>
-      </div>
-      <span class="conn-dot" title="SSE connection"></span>
-    </header>
+  <link rel="stylesheet" href="/static/vendor/cm-chessboard/assets/extensions/markers/markers.css">
+  <link rel="stylesheet" href="/static/vendor/cm-chessboard/assets/extensions/promotion-dialog/promotion-dialog.css">
 
-    <section class="grid gap-6 md:grid-cols-[1fr_18rem]">
-      <div>
-        <!-- cm-chessboard renders into this div; data-effect re-positions it on every fen signal patch. -->
-        <div id="board" class="aspect-square w-full"
-             data-effect="window.__board && window.__board.setPosition($fen, true)"></div>
-
-        <!-- Simple move entry: UCI text input + send button. Replaces drag-and-drop until the
-             cm-chessboard wiring is done (deferred to a UX polish task). -->
-        <form
-          class="mt-3 flex gap-2"
-          data-on-submit="
-            @post('/games/{{.GameID}}/move', {
-              body: {seq: $seq, move: $intended_move, client_action_id: crypto.randomUUID()},
-              headers: {'X-Player-ID': '{{.As}}'}
-            });
-            $intended_move = '';
-            event.preventDefault()"
-        >
-          <input
-            data-bind-intended_move
-            class="flex-1 rounded-md border border-panel-muted/30 bg-transparent px-3 py-2 font-mono"
-            placeholder="e2e4 (UCI)"
-            pattern="[a-h][1-8][a-h][1-8][qrbn]?"
-            required>
-          <button type="submit" class="rounded-md bg-panel-accent px-4 py-2 font-medium text-white">
-            Send
-          </button>
-        </form>
-      </div>
-
-      <aside class="space-y-4">
-        <div class="flex justify-between">
-          <div>
-            <p class="text-xs uppercase text-panel-muted">White</p>
-            <p class="clock" data-text="formatClock($white_ms)" data-class-clock-active="$turn === 'w' && $outcome === 0"></p>
-          </div>
-          <div class="text-right">
-            <p class="text-xs uppercase text-panel-muted">Black</p>
-            <p class="clock" data-text="formatClock($black_ms)" data-class-clock-active="$turn === 'b' && $outcome === 0"></p>
-          </div>
-        </div>
-
-        <div data-show="$outcome !== 0" class="rounded-lg border border-board-last-from/40 bg-board-last-from/10 p-3 text-sm">
-          <p data-text="outcomeMessage($outcome, $termination)"></p>
-        </div>
-
-        <ul id="move-list" class="move-list rounded-md border border-panel-muted/30 p-2"></ul>
-
-        <!-- Draw-offer banner: shown only when the OPPONENT has a pending offer. -->
-        <div
-          data-show="$draw_offer_from !== '' && $draw_offer_from !== mySide('{{.As}}') && $outcome === 0"
-          class="rounded-lg border border-board-last-from/40 bg-board-last-from/10 p-3 text-sm"
-        >
-          <p class="mb-2">Opponent offers a draw.</p>
-          <button
-            class="rounded-md bg-panel-accent px-3 py-1 text-white"
-            data-on-click="@post('/games/{{.GameID}}/draw-offer/accept', {body: {seq: $seq, client_action_id: crypto.randomUUID()}, headers: {'X-Player-ID': '{{.As}}'}})"
-          >Accept draw</button>
-        </div>
-
-        <!-- Player controls — visible only while ongoing AND you are a participant. -->
-        <div
-          data-show="$outcome === 0 && mySide('{{.As}}') !== ''"
-          class="flex gap-2"
-        >
-          <button
-            class="rounded-md border border-panel-muted/30 px-3 py-1 text-sm"
-            data-on-click="if (confirm('Offer a draw?')) @post('/games/{{.GameID}}/draw-offer', {body: {seq: $seq, client_action_id: crypto.randomUUID()}, headers: {'X-Player-ID': '{{.As}}'}})"
-          >Offer draw</button>
-          <button
-            class="rounded-md border border-board-check/40 px-3 py-1 text-sm text-board-check"
-            data-on-click="if (confirm('Resign the game?')) @post('/games/{{.GameID}}/resign', {body: {seq: $seq, client_action_id: crypto.randomUUID()}, headers: {'X-Player-ID': '{{.As}}'}})"
-          >Resign</button>
-        </div>
-      </aside>
-    </section>
-
-    <div id="toast" data-show="$error" class="toast" role="alert"></div>
-  </main>
-
-  <script type="module">
-    // Bootstrap cm-chessboard once the page loads. Stashed on window so the
-    // Datastar `data-effect` above can call setPosition(fen) when the $fen
-    // signal patches in.
-    import {Chessboard, INPUT_EVENT_TYPE, COLOR} from '/static/vendor/cm-chessboard/src/Chessboard.js';
-    const el = document.getElementById('board');
-    const initialFen = el.closest('[data-signals]').getAttribute('data-signals');
-    const fen = JSON.parse(initialFen).fen;
-    window.__board = new Chessboard(el, {
-      position: fen,
-      assetsUrl: '/static/vendor/cm-chessboard/assets/',
-    });
-
-    // Tiny helpers Datastar expressions call:
-    window.formatClock = (ms) => {
-      const s = Math.max(0, Math.floor(ms / 1000));
-      const m = Math.floor(s / 60);
-      const r = s % 60;
-      return `${m}:${r.toString().padStart(2, '0')}`;
+  <!--
+    Helpers attached to `window` so the page module script (and inline
+    handlers) can use them. Synchronous <script> — no Datastar reactivity
+    means no expression sandbox to satisfy.
+  -->
+  <script>
+    window.formatClock = function (ms) {
+      if (typeof ms !== 'number' || !isFinite(ms)) return '--:--';
+      const totalSec = Math.max(0, Math.floor(ms / 1000));
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      if (totalSec < 20 && ms > 0) {
+        const tenths = Math.floor(Math.max(0, ms) / 100) % 10;
+        return m + ':' + s.toString().padStart(2, '0') + '.' + tenths;
+      }
+      return m + ':' + s.toString().padStart(2, '0');
     };
-    window.outcomeMessage = (outcome, termination) => {
+    window.outcomeMessage = function (outcome, termination) {
       const reasons = {
         1: 'checkmate', 2: 'stalemate', 3: 'insufficient material',
-        4: 'fivefold repetition', 5: '75-move rule', 6: 'threefold repetition',
-        7: '50-move rule', 8: 'flag on time', 9: 'resignation', 10: 'agreed draw',
+        4: 'fivefold repetition', 5: '75-move rule',
+        6: 'threefold repetition', 7: '50-move rule',
+        8: 'flag on time', 9: 'resignation', 10: 'agreed draw',
       };
-      const reason = reasons[termination] ? ` (${reasons[termination]})` : '';
+      const reason = reasons[termination] ? ' (' + reasons[termination] + ')' : '';
       if (outcome === 1) return 'White wins' + reason;
       if (outcome === 2) return 'Black wins' + reason;
       if (outcome === 3) return 'Draw' + reason;
       return '';
     };
-    // mySide('alice') returns 'w'/'b'/'' so the UI knows which colour the
-    // viewer is playing (used to hide the resign button for spectators and
-    // to show the draw-accept banner only on the OPPOSITE side).
-    window.mySide = (asValue) => {
-      // The server-rendered template doesn't currently expose the player→colour
-      // mapping; for the MVP we treat asValue=='' as spectator and otherwise
-      // assume the asValue is one of the two participants — which side, the
-      // client doesn't know without a lookup. As a workaround the client
-      // checks $turn after each move: if you just moved, you were active.
-      // The banner is conservative — we show "accept" only when an offer
-      // exists AND we're a participant.
-      return asValue === '' ? '' : ($turn === 'w' ? 'b' : 'w');
+  </script>
+</head>
+<body>
+  <!--
+    NO Datastar JS — vanilla EventSource drives live updates, and direct
+    DOM manipulation handles the few bindings we used to express via
+    data-* attributes. Initial state is parsed from #initial-state below.
+  -->
+  <main id="game-root" class="game-shell">
+    <script id="initial-state" type="application/json">{"seq":{{.Snapshot.Seq}},"server_unix_ms":{{.Snapshot.ServerUnixMS}},"active_expires_at_unix_ms":{{.Snapshot.ActiveExpiresAtUnixMS}},"white_ms":{{.Snapshot.WhiteMS}},"black_ms":{{.Snapshot.BlackMS}},"turn":"{{.Snapshot.Turn}}","outcome":{{.Snapshot.Outcome}},"termination":{{.Snapshot.Termination}},"last_move":"{{.Snapshot.LastMove}}","fen":"{{.Snapshot.FEN}}","draw_offer_from":"{{.Snapshot.DrawOfferFrom}}","legal_moves":[{{range $i, $m := .Snapshot.LegalMoves}}{{if $i}},{{end}}"{{$m}}"{{end}}],"check_square":"{{.Snapshot.CheckSquare}}","can_claim_draw":{{if .Snapshot.CanClaimDraw}}true{{else}}false{{end}}}</script>
+    <script id="rematch-config" type="application/json">{"white":"{{.White}}","black":"{{.Black}}","my_color":"{{.MyColor}}"}</script>
+
+    <header class="mb-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight">Game <code class="font-mono text-base">{{.GameID}}</code></h1>
+        <p class="text-panel-muted text-sm">
+          You: <code>{{ if .As }}{{.As}}{{ else }}spectator{{ end }}</code>
+          {{- if .MyColor }} ({{ if eq .MyColor "w" }}white{{ else }}black{{ end }}){{ end }}
+        </p>
+      </div>
+      <span class="flex items-center gap-2 text-xs text-panel-muted">
+        <span id="conn-dot" class="conn-dot" data-state="closed" title="SSE connection"></span>
+        <span id="conn-label">offline</span>
+      </span>
+    </header>
+
+    <section class="grid gap-6 md:grid-cols-[1fr_20rem]">
+      <div class="space-y-3">
+        <div id="chip-top" class="player-chip">
+          <div class="player-name">{{ if eq .MyColor "w" }}{{.Black}}{{ else }}{{.White}}{{ end }}</div>
+          <div class="player-clock" id="chip-top-clock">--:--</div>
+        </div>
+
+        <div id="board" class="mx-auto aspect-square w-full max-w-[600px]"></div>
+
+        <div id="chip-bottom" class="player-chip">
+          <div class="player-name">{{ if eq .MyColor "w" }}{{.White}}{{ else if eq .MyColor "b" }}{{.Black}}{{ else }}spectator{{ end }}</div>
+          <div class="player-clock" id="chip-bottom-clock">--:--</div>
+        </div>
+
+        {{ if .MyColor }}
+        <div class="flex gap-2 text-sm">
+          <input
+            id="uci-input"
+            class="flex-1 rounded-md border border-panel-muted/30 bg-transparent px-3 py-1.5 font-mono"
+            placeholder="Type UCI (e2e4) and press Enter, or drag pieces"
+            pattern="[a-h][1-8][a-h][1-8][qrbn]?"
+            autocomplete="off"
+            spellcheck="false">
+          <button id="uci-send" type="button"
+                  class="rounded-md bg-panel-accent px-3 py-1.5 text-white">Send</button>
+        </div>
+
+        <div class="rounded-md border border-panel-muted/30 p-3 text-sm space-y-2">
+          <p class="text-panel-muted">
+            {{- if eq .MyColor "w" -}}Share with black ({{.Black}}):{{- end -}}
+            {{- if eq .MyColor "b" -}}Share with white ({{.White}}):{{- end -}}
+          </p>
+          <div class="flex gap-2">
+            <input id="opponent-link" readonly
+                   class="flex-1 rounded-md border border-panel-muted/30 bg-transparent px-2 py-1 font-mono text-xs"
+                   value="/game/{{.GameID}}?as={{ if eq .MyColor "w" }}{{.Black}}{{ else }}{{.White}}{{ end }}">
+            <button id="copy-link" type="button"
+                    class="rounded-md border border-panel-muted/30 px-3 py-1 text-xs">Copy</button>
+          </div>
+          <p class="text-panel-muted text-xs">
+            Spectator link:
+            <a class="text-panel-accent underline" href="/game/{{.GameID}}">/game/{{.GameID}}</a>
+          </p>
+        </div>
+        {{ else }}
+        <p class="rounded-md border border-panel-muted/30 p-3 text-sm text-panel-muted">
+          Spectating. Players: <code>{{.White}}</code> (white) vs <code>{{.Black}}</code> (black).
+        </p>
+        {{ end }}
+      </div>
+
+      <aside class="space-y-4">
+        <div id="outcome-banner" hidden class="rounded-lg border border-board-last-from/40 bg-board-last-from/10 p-3 text-sm space-y-2">
+          <p class="font-medium" id="outcome-message"></p>
+          <div class="flex gap-2">
+            <a href="/" class="rounded-md bg-panel-accent px-3 py-1 text-white text-sm">New game</a>
+            {{ if .MyColor }}
+            <button id="rematch-btn" type="button"
+                    class="rounded-md border border-panel-muted/30 px-3 py-1 text-sm">Rematch</button>
+            {{ end }}
+          </div>
+        </div>
+
+        <div>
+          <p class="text-xs uppercase text-panel-muted mb-1">Moves</p>
+          <ol id="move-list" class="move-list rounded-md border border-panel-muted/30 p-2"></ol>
+        </div>
+
+        {{ if .MyColor }}
+        <div id="draw-offer-banner" hidden class="rounded-lg border border-board-last-from/40 bg-board-last-from/10 p-3 text-sm space-y-2">
+          <p>Opponent offers a draw.</p>
+          <button
+            id="draw-accept-btn"
+            type="button"
+            class="rounded-md bg-panel-accent px-3 py-1 text-white text-sm"
+          >Accept draw</button>
+        </div>
+
+        <div id="claim-draw-banner" hidden class="rounded-lg border border-panel-accent/40 bg-panel-accent/10 p-3 text-sm space-y-2">
+          <p id="claim-draw-reason" class="text-panel-fg"></p>
+          <button id="claim-draw-btn" type="button"
+                  class="rounded-md bg-panel-accent px-3 py-1 text-white text-sm">Claim draw</button>
+        </div>
+
+        <div id="action-bar" class="flex gap-2">
+          <button
+            id="offer-draw-btn"
+            type="button"
+            class="rounded-md border border-panel-muted/30 px-3 py-1.5 text-sm"
+          >Offer draw</button>
+          <button
+            id="resign-btn"
+            type="button"
+            class="rounded-md border border-board-check/40 px-3 py-1.5 text-sm text-board-check"
+          >Resign</button>
+        </div>
+        {{ end }}
+      </aside>
+    </section>
+
+    <div id="toast" hidden class="toast" role="alert"></div>
+  </main>
+
+  <script type="module">
+    // -----------------------------------------------------------------
+    // Game-page bootstrap — Datastar-free, vanilla EventSource + DOM.
+    //   - cm-chessboard with Markers + PromotionDialog
+    //   - vanilla EventSource subscribes to /games/{id}/sse and parses
+    //     dsenc wire frames (datastar-patch-signals / -patch-elements)
+    //   - rAF loop interpolates clocks and applies fen + last-move
+    //     changes when the SSE handler updates window.__gs
+    //   - vanilla fetch for move/resign/draw-offer/draw-accept
+    // -----------------------------------------------------------------
+    import {Chessboard, COLOR, INPUT_EVENT_TYPE, BORDER_TYPE} from '/static/vendor/cm-chessboard/src/Chessboard.js';
+    import {Markers, MARKER_TYPE} from '/static/vendor/cm-chessboard/src/extensions/markers/Markers.js';
+    import {PromotionDialog} from '/static/vendor/cm-chessboard/src/extensions/promotion-dialog/PromotionDialog.js';
+
+    const me      = "{{.As}}";
+    const myColor = "{{.MyColor}}";   // "w" | "b" | "" (spectator)
+    const gameID  = "{{.GameID}}";
+
+    // === Initial state ==========================================
+    const initial = JSON.parse(document.getElementById('initial-state').textContent);
+    const rematchCfg = JSON.parse(document.getElementById('rematch-config').textContent);
+    window.__gs = {
+      seq:             initial.seq,
+      server_unix:     initial.server_unix_ms,
+      expires:         initial.active_expires_at_unix_ms,
+      white_ms:        initial.white_ms,
+      black_ms:        initial.black_ms,
+      turn:            initial.turn,
+      outcome:         initial.outcome,
+      termination:     initial.termination,
+      last_move:       initial.last_move,
+      fen:             initial.fen,
+      draw_offer_from: initial.draw_offer_from,
+      legal_moves:     initial.legal_moves || [],
+      check_square:    initial.check_square || '',
+      can_claim_draw:  !!initial.can_claim_draw,
     };
+
+    // isLegalMove tests whether dragging `from`→`to` is legal under the
+    // server's latest snapshot. Promotion moves carry a piece-suffix in the
+    // legal list ("e7e8q" etc.); a bare from+to match for promotions is
+    // impossible — we accept it iff ANY of the four promotion variants is
+    // legal, so the promotion dialog opens.
+    function isLegalMove(from, to) {
+      const legal = window.__gs.legal_moves || [];
+      const base = from + to;
+      if (legal.includes(base)) return true;
+      for (const suf of ['q', 'r', 'b', 'n']) {
+        if (legal.includes(base + suf)) return true;
+      }
+      return false;
+    }
+
+    // === Board ===================================================
+    const orientation = myColor === 'b' ? COLOR.black : COLOR.white;
+    const board = new Chessboard(document.getElementById('board'), {
+      position: window.__gs.fen,
+      orientation: orientation,
+      assetsUrl: '/static/vendor/cm-chessboard/assets/',
+      style: {
+        cssClass: 'default',
+        showCoordinates: true,
+        borderType: BORDER_TYPE.thin,
+        pieces: { file: 'pieces/staunty.svg' },
+      },
+      extensions: [
+        { class: Markers },
+        { class: PromotionDialog },
+      ],
+    });
+    window.__board = board;
+
+    function refreshLastMoveMarkers(uci) {
+      board.removeMarkers(MARKER_TYPE.square);
+      if (!uci || uci.length < 4) return;
+      board.addMarker(MARKER_TYPE.square, uci.slice(0, 2));
+      board.addMarker(MARKER_TYPE.square, uci.slice(2, 4));
+    }
+    refreshLastMoveMarkers(window.__gs.last_move);
+
+    // === Vanilla SSE intake =====================================
+    // Subscribes to /games/{id}/sse, parses the dsenc wire frames
+    // (datastar-patch-signals / -patch-elements) ourselves, and
+    // updates window.__gs + DOM directly. Bypasses Datastar JS
+    // entirely — the bundle was unreliable for opponent updates.
+    // clockSkew = clientNow_at_snapshot - server_unix_at_snapshot. Captured
+    // every time we receive a signals patch so the rAF clock loop can
+    // translate between server-wall-clock and client-wall-clock without
+    // assuming the two are in sync.
+    let clockSkew = Date.now() - initial.server_unix_ms;
+
+    function applyPatchSignals(line) {
+      // line looks like "signals {json}"
+      if (!line.startsWith('signals ')) return;
+      let patch;
+      try { patch = JSON.parse(line.slice('signals '.length)); }
+      catch (e) { console.warn('bad signals patch', e); return; }
+      // Only keys whose server-side name differs from the local mirror name
+      // appear here; everything else passes through verbatim via map[k] || k.
+      const map = {
+        server_unix_ms: 'server_unix',
+        active_expires_at_unix_ms: 'expires',
+      };
+      for (const [k, v] of Object.entries(patch)) {
+        const localKey = map[k] || k;
+        window.__gs[localKey] = v;
+      }
+      // Recompute skew on each snapshot — the captured client time is NOW
+      // (the moment we received this patch), the server time is the value
+      // the patch carries. The delta is the constant clock offset.
+      if (typeof window.__gs.server_unix === 'number' && window.__gs.server_unix > 0) {
+        clockSkew = Date.now() - window.__gs.server_unix;
+      }
+    }
+    function applyPatchElements(dataLines) {
+      // dataLines is the full data: payload split by \n. Each line
+      // starts with one of "selector ", "mode ", "elements ".
+      let selector = '', mode = 'outer', elementsHTML = '';
+      for (const ln of dataLines) {
+        if (ln.startsWith('selector ')) selector = ln.slice('selector '.length);
+        else if (ln.startsWith('mode '))    mode = ln.slice('mode '.length);
+        else if (ln.startsWith('elements ')) elementsHTML = ln.slice('elements '.length);
+      }
+      if (!selector || !elementsHTML) return;
+      const targets = document.querySelectorAll(selector);
+      if (!targets.length) return;
+      const tpl = document.createElement('template');
+      tpl.innerHTML = elementsHTML;
+      const frag = tpl.content;
+      for (const t of targets) {
+        const clone = frag.cloneNode(true);
+        switch (mode) {
+          case 'append':  t.append(clone); break;
+          case 'prepend': t.prepend(clone); break;
+          case 'inner':   t.replaceChildren(clone); break;
+          case 'before':  t.before(clone); break;
+          case 'after':   t.after(clone); break;
+          case 'remove':  t.remove(); break;
+          case 'replace':
+          case 'outer':
+          default:
+            t.replaceWith(clone); break;
+        }
+      }
+    }
+
+    const connDot = document.getElementById('conn-dot');
+    const connLabel = document.getElementById('conn-label');
+    function setConn(state, label) {
+      connDot.dataset.state = state;
+      connLabel.textContent = label;
+    }
+    let evt = null;
+    function openSSE() {
+      try { if (evt) evt.close(); } catch {}
+      evt = new EventSource('/games/' + gameID + '/sse');
+      setConn('connecting', 'connecting…');
+      evt.onopen = () => setConn('open', 'live');
+      evt.onerror = () => {
+        if (evt && evt.readyState === EventSource.CLOSED) {
+          setConn('closed', 'reconnecting…');
+          setTimeout(openSSE, 1000);
+        } else {
+          setConn('closed', 'offline');
+        }
+      };
+      evt.addEventListener('datastar-patch-signals', (e) => {
+        for (const ln of e.data.split('\n')) applyPatchSignals(ln);
+      });
+      evt.addEventListener('datastar-patch-elements', (e) => {
+        applyPatchElements(e.data.split('\n'));
+      });
+    }
+    openSSE();
+
+    // === Sound effects (Web Audio, no vendored files) =========
+    // One AudioContext lazy-created on the first move; some browsers
+    // require a user gesture before play() so we defer creation. Three
+    // SFX: a soft click for moves, a higher two-tone chirp for check,
+    // and a descending tritone for game-over.
+    let audioCtx = null;
+    function audio() {
+      if (!audioCtx) {
+        try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+        catch { /* no audio */ }
+      }
+      return audioCtx;
+    }
+    function tone(freq, dur, type, gain) {
+      const ctx = audio();
+      if (!ctx) return;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(gain || 0.18, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      o.start();
+      o.stop(ctx.currentTime + dur);
+    }
+    function sndMove()   { tone(440, 0.08, 'triangle', 0.16); }
+    function sndCheck()  { tone(880, 0.12, 'square', 0.14); setTimeout(()=>tone(1320, 0.18, 'square', 0.12), 90); }
+    function sndEnd()    { tone(660, 0.18, 'sine', 0.2); setTimeout(()=>tone(440, 0.18, 'sine', 0.2), 140); setTimeout(()=>tone(330, 0.32, 'sine', 0.2), 280); }
+
+    // === Move submission =========================================
+    async function submitMove(uci) {
+      const body = {
+        seq: window.__gs.seq,
+        move: uci,
+        client_action_id: crypto.randomUUID(),
+      };
+      try {
+        const resp = await fetch('/games/' + gameID + '/move', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-Player-ID': me,
+          },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok && resp.status !== 200 && resp.status !== 204) {
+          let msg = 'HTTP ' + resp.status;
+          try {
+            const env = await resp.json();
+            if (env && env.error && env.error.message) msg = env.error.message;
+          } catch {}
+          showToast(msg);
+          if (window.__gs.fen) board.setPosition(window.__gs.fen, true);
+        }
+      } catch (err) {
+        showToast('network error');
+        if (window.__gs.fen) board.setPosition(window.__gs.fen, true);
+      }
+    }
+    window.__submitMove = submitMove;
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.hidden = false;
+      setTimeout(() => { t.hidden = true; }, 2500);
+    }
+
+    // === Legal-destination dots on pickup =======================
+    function paintLegalDots(from) {
+      board.removeMarkers(MARKER_TYPE.dot);
+      const legal = window.__gs.legal_moves || [];
+      const seen = new Set();
+      for (const uci of legal) {
+        if (uci.length < 4 || uci.slice(0, 2) !== from) continue;
+        const to = uci.slice(2, 4);
+        if (seen.has(to)) continue;     // promotions: dedup q/r/b/n
+        seen.add(to);
+        board.addMarker(MARKER_TYPE.dot, to);
+      }
+    }
+    function clearLegalDots() { board.removeMarkers(MARKER_TYPE.dot); }
+
+    // === Drag-and-drop ==========================================
+    if (myColor) {
+      const myCmColor = myColor === 'b' ? COLOR.black : COLOR.white;
+      board.enableMoveInput((event) => {
+        if (event.type === INPUT_EVENT_TYPE.moveInputStarted) {
+          const gs = window.__gs;
+          if (gs.outcome !== 0) return false;
+          if (gs.turn !== myColor) return false;
+          paintLegalDots(event.squareFrom || event.square);
+          return true;
+        }
+        if (event.type === INPUT_EVENT_TYPE.validateMoveInput) {
+          clearLegalDots();
+          const from = event.squareFrom;
+          const to = event.squareTo;
+          // Reject illegal moves BEFORE cm-chessboard accepts them — this
+          // gives an instant snap-back with no network round-trip, no
+          // server-side rejection envelope, no flicker.
+          if (!isLegalMove(from, to)) return false;
+          const piece = event.piece;
+          const isPromotion = piece && piece[1] === 'p' &&
+            ((piece[0] === 'w' && to[1] === '8') || (piece[0] === 'b' && to[1] === '1'));
+          if (isPromotion) {
+            board.showPromotionDialog(to, piece[0], (result) => {
+              if (result && result.piece) submitMove(from + to + result.piece[1]);
+              else if (window.__gs.fen) board.setPosition(window.__gs.fen, true);
+            });
+            return true;
+          }
+          submitMove(from + to);
+          return true;
+        }
+        // Clear dots if the user drops outside the board or cancels.
+        if (event.type === INPUT_EVENT_TYPE.moveInputCanceled
+            || event.type === INPUT_EVENT_TYPE.moveInputFinished) {
+          clearLegalDots();
+        }
+        return true;
+      }, myCmColor);
+    }
+
+    // === rAF loop: clocks, board fen sync, markers, banners, sounds ===
+    // All DOM lookups and tracking-var seeds live in declaration order — no
+    // forward references. Earlier I had the claim-banner init BEFORE the
+    // claimBanner const, which threw a TDZ ReferenceError and silently took
+    // out the rAF loop AND every event handler that ran after this block.
+    const wClockEl = document.getElementById('chip-top-clock');
+    const bClockEl = document.getElementById('chip-bottom-clock');
+    const topIsWhite = myColor === 'b';
+    const topColor = topIsWhite ? 'w' : 'b';
+    const bottomColor = topIsWhite ? 'b' : 'w';
+    const chipTop = document.getElementById('chip-top');
+    const chipBot = document.getElementById('chip-bottom');
+    const outcomeBanner = document.getElementById('outcome-banner');
+    const outcomeMsg = document.getElementById('outcome-message');
+    const drawBanner = document.getElementById('draw-offer-banner');
+    const claimBanner = document.getElementById('claim-draw-banner');
+    const claimReason = document.getElementById('claim-draw-reason');
+    const opponentLetter = myColor === 'w' ? 'b' : (myColor === 'b' ? 'w' : '');
+
+    let lastFen = window.__gs.fen;
+    let lastShownMove = window.__gs.last_move;
+    let lastCheckSq = window.__gs.check_square || '';
+    let lastClaimable = !!window.__gs.can_claim_draw;
+    let lastSeq = window.__gs.seq;
+    let lastOutcome = window.__gs.outcome;
+    let lastDrawFrom = window.__gs.draw_offer_from;
+
+    function paintCheckMarker(sq) {
+      board.removeMarkers(MARKER_TYPE.frameDanger);
+      if (sq) board.addMarker(MARKER_TYPE.frameDanger, sq);
+    }
+
+    // One-time boot-state paint: banners + check marker. Seeded BEFORE the
+    // rAF loop so the page renders correctly even before the first SSE
+    // patch arrives. No sounds played here — sndEnd would otherwise blast
+    // every time a viewer opens a tab to an already-finished game.
+    if (window.__gs.outcome !== 0) {
+      outcomeMsg.textContent = outcomeMessage(window.__gs.outcome, window.__gs.termination);
+      outcomeBanner.hidden = false;
+    }
+    if (drawBanner) {
+      drawBanner.hidden = !(window.__gs.draw_offer_from === opponentLetter && window.__gs.outcome === 0);
+    }
+    if (claimBanner && lastClaimable && window.__gs.outcome === 0) {
+      claimReason.textContent = 'Threefold repetition or 50-move rule reached — you may claim a draw.';
+      claimBanner.hidden = false;
+    }
+    if (window.__gs.check_square) paintCheckMarker(window.__gs.check_square);
+
+    function tick() {
+      const gs = window.__gs;
+      const seqAdvanced = gs.seq !== lastSeq;
+
+      // Board fen sync.
+      if (gs.fen && gs.fen !== lastFen) {
+        board.setPosition(gs.fen, true);
+        lastFen = gs.fen;
+      }
+      // Last-move marker sync.
+      if (gs.last_move !== lastShownMove) {
+        refreshLastMoveMarkers(gs.last_move);
+        lastShownMove = gs.last_move;
+      }
+      // Check marker.
+      if (gs.check_square !== lastCheckSq) {
+        paintCheckMarker(gs.check_square);
+        lastCheckSq = gs.check_square;
+      }
+      // Clock interpolation.
+      let wMs = gs.white_ms;
+      let bMs = gs.black_ms;
+      if (gs.outcome === 0 && gs.expires > 0 && gs.server_unix > 0) {
+        const remaining = gs.expires - (Date.now() - clockSkew);
+        const clamped = Math.max(0, remaining);
+        if (gs.turn === 'w') wMs = clamped;
+        else bMs = clamped;
+      }
+      const topMs = topColor === 'w' ? wMs : bMs;
+      const bottomMs = bottomColor === 'w' ? wMs : bMs;
+      wClockEl.textContent = formatClock(topMs);
+      bClockEl.textContent = formatClock(bottomMs);
+      const topActive = gs.outcome === 0 && gs.turn === topColor;
+      const bottomActive = gs.outcome === 0 && gs.turn === bottomColor;
+      chipTop.classList.toggle('is-active', topActive);
+      chipBot.classList.toggle('is-active', bottomActive);
+
+      // Outcome banner.
+      if (gs.outcome !== lastOutcome) {
+        if (gs.outcome !== 0) {
+          outcomeMsg.textContent = outcomeMessage(gs.outcome, gs.termination);
+          outcomeBanner.hidden = false;
+          sndEnd();
+        } else {
+          outcomeBanner.hidden = true;
+        }
+        lastOutcome = gs.outcome;
+      }
+      // Draw-offer banner — only when OPPONENT offered.
+      if (drawBanner && gs.draw_offer_from !== lastDrawFrom) {
+        drawBanner.hidden = !(gs.draw_offer_from === opponentLetter && gs.outcome === 0);
+        lastDrawFrom = gs.draw_offer_from;
+      }
+      // Claim-draw banner. Shown to either participant while can_claim_draw
+      // is true AND the game is still ongoing. The reason text picks the
+      // first matching FIDE basis (we don't echo both — server short-circuits
+      // on threefold first).
+      if (claimBanner && !!gs.can_claim_draw !== lastClaimable) {
+        if (gs.can_claim_draw && gs.outcome === 0) {
+          claimReason.textContent = 'Threefold repetition or 50-move rule reached — you may claim a draw.';
+          claimBanner.hidden = false;
+        } else {
+          claimBanner.hidden = true;
+        }
+        lastClaimable = !!gs.can_claim_draw;
+      }
+
+      // Sound: play move click whenever seq advanced (any state change).
+      // Check sound fires if the move ALSO put the active side in check.
+      // End sound is fired in the outcome-banner branch above so we don't
+      // double up here.
+      if (seqAdvanced) {
+        if (gs.outcome === 0) {
+          if (gs.check_square) sndCheck();
+          else sndMove();
+        }
+        lastSeq = gs.seq;
+      }
+
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    // === Secondary UCI text input ==============================
+    const uciInput = document.getElementById('uci-input');
+    const uciSend = document.getElementById('uci-send');
+    if (uciInput && uciSend) {
+      const send = () => {
+        const v = uciInput.value.trim();
+        if (v && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(v)) {
+          submitMove(v);
+          uciInput.value = '';
+        } else if (v) {
+          uciInput.classList.add('text-board-check');
+          setTimeout(() => uciInput.classList.remove('text-board-check'), 600);
+        }
+      };
+      uciSend.addEventListener('click', send);
+      uciInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); send(); }
+      });
+    }
+
+    // === Resign / draw-offer / draw-accept ====================
+    async function postAction(path) {
+      const body = { seq: window.__gs.seq, client_action_id: crypto.randomUUID() };
+      try {
+        const resp = await fetch('/games/' + gameID + path, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-Player-ID': me,
+          },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok && resp.status !== 200 && resp.status !== 204) {
+          let msg = 'HTTP ' + resp.status;
+          try {
+            const env = await resp.json();
+            if (env && env.error && env.error.message) msg = env.error.message;
+          } catch {}
+          showToast(msg);
+        }
+      } catch (err) {
+        showToast('network error');
+      }
+    }
+    document.getElementById('resign-btn')?.addEventListener('click', () => {
+      if (confirm('Resign the game?')) postAction('/resign');
+    });
+    document.getElementById('offer-draw-btn')?.addEventListener('click', () => {
+      if (confirm('Offer a draw?')) postAction('/draw-offer');
+    });
+    document.getElementById('draw-accept-btn')?.addEventListener('click', () => {
+      postAction('/draw-offer/accept');
+    });
+    document.getElementById('claim-draw-btn')?.addEventListener('click', () => {
+      postAction('/claim-draw');
+    });
+
+    // === Rematch ===============================================
+    // POSTs /games with colors swapped (the previous black plays white in
+    // the rematch — chess convention) and navigates the current viewer to
+    // their seat in the new game. Reuses the time-control from the current
+    // game's clocks: we don't have it client-side, so we just use the
+    // defaults. Could be tightened by surfacing TC from the snapshot later.
+    document.getElementById('rematch-btn')?.addEventListener('click', async () => {
+      const newWhite = rematchCfg.black;
+      const newBlack = rematchCfg.white;
+      try {
+        const resp = await fetch('/games', {
+          method: 'POST',
+          headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            white: newWhite, black: newBlack,
+            time_control: {initial_ms: 180000, increment_ms: 2000, delay_ms: 0},
+          }),
+        });
+        if (!resp.ok) { showToast('rematch failed'); return; }
+        const data = await resp.json();
+        // Stay on the same color identity from the user's perspective.
+        const myNewSeat = rematchCfg.my_color === 'w' ? newBlack : newWhite;
+        window.location.href = '/game/' + encodeURIComponent(data.game_id)
+          + '?as=' + encodeURIComponent(myNewSeat);
+      } catch {
+        showToast('rematch failed');
+      }
+    });
+
+    // === Copy share-link =======================================
+    document.getElementById('copy-link')?.addEventListener('click', async () => {
+      const input = document.getElementById('opponent-link');
+      const abs = window.location.origin + input.value;
+      try { await navigator.clipboard.writeText(abs); }
+      catch {
+        input.select();
+        document.execCommand('copy');
+      }
+      const btn = document.getElementById('copy-link');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = orig; }, 1200);
+    });
   </script>
 </body>
 </html>

@@ -98,6 +98,13 @@ func NewGameRoom(id GameID, white, black PlayerID, tc TimeControl, now time.Time
 // and never mutated.
 func (r *GameRoom) ID() GameID { return r.id }
 
+// Participants returns the white and black player IDs. Lock-free; players
+// are set at construction and never mutated. Used by the HTTP layer to
+// render share-with-opponent links into the game page.
+func (r *GameRoom) Participants() (white, black PlayerID) {
+	return r.players[White], r.players[Black]
+}
+
 // Hub exposes the fan-out hub so the SSE handler can register subscribers.
 // Lock-free; the field is set at construction and never re-assigned.
 func (r *GameRoom) Hub() *sse.FanoutHub { return r.hub }
@@ -140,6 +147,46 @@ func (r *GameRoom) snapshotLocked(now time.Time) BoardSnapshot {
 		drawFrom = r.drawOfferFrom.String()
 	}
 
+	// Enumerate the side-to-move's legal moves so the client can refuse
+	// illegal drags before they animate (Option B — server is the authority,
+	// no engine on the client). Skipped when the game is over: no moves to
+	// play, and we keep the wire payload tiny.
+	var legal []string
+	if r.outcome == Ongoing {
+		moves := r.game.Position().ValidMoves()
+		legal = make([]string, len(moves))
+		enc := libchess.UCINotation{}
+		for i := range moves {
+			legal[i] = enc.Encode(nil, &moves[i])
+		}
+	}
+
+	// check-detection: the side-to-move is in check iff the LAST move played
+	// carries the Check tag. The corentings engine sets this tag on every
+	// legal move whose application leaves the OPPONENT in check — i.e. the
+	// position now in front of us.
+	checkSq := ""
+	if r.outcome == Ongoing {
+		if ms := r.game.Moves(); len(ms) > 0 {
+			last := ms[len(ms)-1]
+			if last.HasTag(libchess.Check) {
+				checkSq = findKingSquare(r.game.Position(), r.clocks.Active)
+			}
+		}
+	}
+
+	// claimable draws — surface BEFORE we apply auto-detection so the client
+	// can let the player decide. Threefold uses our internal counter (FIDE-
+	// correct hash includes en-passant). Fifty-move uses the position's
+	// halfmove clock.
+	canClaim := false
+	if r.outcome == Ongoing {
+		pos := r.game.Position()
+		if r.repetition[positionKey(pos)] >= 3 || pos.HalfMoveClock() >= 100 {
+			canClaim = true
+		}
+	}
+
 	return BoardSnapshot{
 		Seq:                   r.seq,
 		ServerUnixMS:          now.UnixMilli(),
@@ -152,7 +199,26 @@ func (r *GameRoom) snapshotLocked(now time.Time) BoardSnapshot {
 		Turn:                  r.clocks.Active,
 		Outcome:               r.outcome,
 		Termination:           r.termination,
+		LegalMoves:            legal,
+		CheckSquare:           checkSq,
+		CanClaimDraw:          canClaim,
 	}
+}
+
+// findKingSquare scans the board for the king of the given color and returns
+// its square in algebraic ("e1", "g8") notation, or "" if no king is on the
+// board (defensive — should never happen in a legal game).
+func findKingSquare(pos *libchess.Position, c Color) string {
+	want := libchess.WhiteKing
+	if c == Black {
+		want = libchess.BlackKing
+	}
+	for sq, p := range pos.Board().SquareMap() {
+		if p == want {
+			return sq.String()
+		}
+	}
+	return ""
 }
 
 // recentAfterLocked returns SSE wire-byte payloads from the replay ring with
@@ -161,6 +227,17 @@ func (r *GameRoom) snapshotLocked(now time.Time) BoardSnapshot {
 // write).
 func (r *GameRoom) recentAfterLocked(lastSeq uint64) (events []SSEEvent, ok bool) {
 	return r.recent.AfterSeq(lastSeq)
+}
+
+// HydrateBytes returns a fresh datastar-patch-signals payload reflecting the
+// room's CURRENT state. Used by the SSE handler for brand-new clients that
+// connect without a Last-Event-ID header — those clients need the
+// authoritative snapshot regardless of whether r.seq happens to equal 0.
+func (r *GameRoom) HydrateBytes(now time.Time) []byte {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	snap := r.snapshotLocked(now)
+	return dsenc.PatchSignalsBytes(snap.Seq, snap.toSignalsJSON())
 }
 
 // ReplayOrSnapshot is the public reconnect helper used by the SSE handler.

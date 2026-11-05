@@ -132,6 +132,22 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 		return ActionResult{}, ErrIllegalMove
 	}
 
+	// SAN for the move list. Encode against the position BEFORE the push so
+	// disambiguation ("Nbd2" vs "Nfd2") is correct. After PushNotationMove
+	// the game's position list has the pre-move pos at index [len-2] and the
+	// post-move pos at [len-1].
+	var sanText string
+	{
+		positions := r.game.Positions()
+		moves := r.game.Moves()
+		if n := len(moves); n > 0 && len(positions) >= n+1 {
+			sanText = libchess.AlgebraicNotation{}.Encode(positions[n-1], moves[n-1])
+		}
+		if sanText == "" {
+			sanText = req.Move // defensive fallback
+		}
+	}
+
 	// Move accepted: credit increment + switch sides.
 	r.clocks.ApplyIncrementAndSwitch(now)
 
@@ -164,7 +180,7 @@ func (r *GameRoom) ApplyMove(ctx context.Context, req MoveReq, now time.Time) (A
 	// id, both go into the ring so Last-Event-ID resume replays them in
 	// order. Constitution V holds: each event is encoded once and the
 	// same []byte is broadcast to every subscriber.
-	moveListBytes := buildMoveListAppend(snap.Seq, req.Move)
+	moveListBytes := buildMoveListAppend(snap.Seq, sanText)
 	r.recent.Append(snap.Seq, SSEEvent{Seq: snap.Seq, Bytes: moveListBytes})
 
 	result := ActionResult{Seq: snap.Seq, Snapshot: snap}

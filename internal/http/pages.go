@@ -55,9 +55,18 @@ func (s *Server) handleLobby(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 // gamePageData is the template context for game.html. The snapshot is
 // taken at render time so the initial Datastar signal store is hydrated
 // with the latest state; subsequent updates arrive via SSE.
+//
+// White and Black expose the participants so the template can render a
+// share-with-opponent link. MyColor is the server-computed "which side
+// is this viewer on" — "w", "b", or "" for spectator — used to drive
+// board orientation and the draw-offer banner without needing client-
+// side string compares.
 type gamePageData struct {
 	GameID   chess.GameID
 	As       chess.PlayerID
+	White    chess.PlayerID
+	Black    chess.PlayerID
+	MyColor  string // "w" | "b" | "" (spectator)
 	Snapshot chess.BoardSnapshot
 }
 
@@ -79,9 +88,23 @@ func (s *Server) handleGamePage(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 
+	white, black := room.Participants()
+	as := chess.PlayerID(r.URL.Query().Get("as"))
+	var myColor string
+	switch as {
+	case white:
+		myColor = "w"
+	case black:
+		myColor = "b"
+	default:
+		myColor = "" // spectator
+	}
 	data := gamePageData{
 		GameID:   id,
-		As:       chess.PlayerID(r.URL.Query().Get("as")),
+		As:       as,
+		White:    white,
+		Black:    black,
+		MyColor:  myColor,
 		Snapshot: room.Snapshot(time.Now()),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
